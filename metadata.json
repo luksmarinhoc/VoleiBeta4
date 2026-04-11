@@ -1,0 +1,5 @@
+{
+  "name": "Gestor de Vôlei v3.0",
+  "description": "Aplicativo para gestão de partidas de vôlei, rotatividade de jogadores e equilíbrio de times.",
+  "requestFramePermissions": []
+}
