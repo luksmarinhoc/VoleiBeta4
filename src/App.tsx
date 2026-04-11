@@ -23,15 +23,65 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 
 export default function App() {
-  const [allPlayers, setAllPlayers] = useState<Player[]>(INITIAL_PLAYERS);
-  const [waitlist, setWaitlist] = useState<string[]>([]);
-  const [teamA, setTeamA] = useState<Player[]>([]);
-  const [teamB, setTeamB] = useState<Player[]>([]);
-  const [consecutiveWinsA, setConsecutiveWinsA] = useState(0);
-  const [consecutiveWinsB, setConsecutiveWinsB] = useState(0);
+  const [allPlayers, setAllPlayers] = useState<Player[]>(() => {
+    const saved = localStorage.getItem('volei_allPlayers');
+    return saved ? JSON.parse(saved) : INITIAL_PLAYERS;
+  });
+  const [waitlist, setWaitlist] = useState<string[]>(() => {
+    const saved = localStorage.getItem('volei_waitlist');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [teamA, setTeamA] = useState<Player[]>(() => {
+    const saved = localStorage.getItem('volei_teamA');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [teamB, setTeamB] = useState<Player[]>(() => {
+    const saved = localStorage.getItem('volei_teamB');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [consecutiveWinsA, setConsecutiveWinsA] = useState(() => {
+    const saved = localStorage.getItem('volei_winsA');
+    return saved ? parseInt(saved) : 0;
+  });
+  const [consecutiveWinsB, setConsecutiveWinsB] = useState(() => {
+    const saved = localStorage.getItem('volei_winsB');
+    return saved ? parseInt(saved) : 0;
+  });
   const [showRatings, setShowRatings] = useState(true);
-  const [lockedPlayers, setLockedPlayers] = useState<Set<string>>(new Set());
+  const [lockedPlayers, setLockedPlayers] = useState<Set<string>>(() => {
+    const saved = localStorage.getItem('volei_locked');
+    return saved ? new Set(JSON.parse(saved)) : new Set();
+  });
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+
+  // Persistence
+  React.useEffect(() => {
+    localStorage.setItem('volei_allPlayers', JSON.stringify(allPlayers));
+  }, [allPlayers]);
+
+  React.useEffect(() => {
+    localStorage.setItem('volei_waitlist', JSON.stringify(waitlist));
+  }, [waitlist]);
+
+  React.useEffect(() => {
+    localStorage.setItem('volei_teamA', JSON.stringify(teamA));
+  }, [teamA]);
+
+  React.useEffect(() => {
+    localStorage.setItem('volei_teamB', JSON.stringify(teamB));
+  }, [teamB]);
+
+  React.useEffect(() => {
+    localStorage.setItem('volei_winsA', consecutiveWinsA.toString());
+  }, [consecutiveWinsA]);
+
+  React.useEffect(() => {
+    localStorage.setItem('volei_winsB', consecutiveWinsB.toString());
+  }, [consecutiveWinsB]);
+
+  React.useEffect(() => {
+    localStorage.setItem('volei_locked', JSON.stringify(Array.from(lockedPlayers)));
+  }, [lockedPlayers]);
 
   // UI State
   const [newPlayerName, setNewPlayerName] = useState('');
@@ -339,7 +389,7 @@ export default function App() {
             onClick={() => setActiveTab('inactive')}
             className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'inactive' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:bg-slate-800'}`}
           >
-            Fora de Jogo
+            Jogadores ({allPlayers.length})
           </button>
         </div>
 
@@ -379,7 +429,7 @@ export default function App() {
                 <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden">
                   <div className="bg-amber-500 p-4 text-slate-950 flex justify-between items-center">
                     <div>
-                      <h3 className="font-bold">Time A (Dourado)</h3>
+                      <h3 className="font-bold">Time A</h3>
                       {showRatings && <p className="text-amber-900 text-xs">Soma: {teamAScore.toFixed(2)}</p>}
                     </div>
                     <div className="flex items-center gap-2">
@@ -426,7 +476,7 @@ export default function App() {
                 <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden">
                   <div className="bg-white p-4 text-slate-950 flex justify-between items-center">
                     <div>
-                      <h3 className="font-bold">Time B (Branco)</h3>
+                      <h3 className="font-bold">Time B</h3>
                       {showRatings && <p className="text-slate-500 text-xs">Soma: {teamBScore.toFixed(2)}</p>}
                     </div>
                     <div className="flex items-center gap-2">
@@ -582,90 +632,115 @@ export default function App() {
                 </button>
               </form>
 
-              {/* Inactive List */}
+              {/* Players List */}
               <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 p-4">
-                <h3 className="font-bold text-slate-200 mb-4">Jogadores Disponíveis</h3>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-bold text-slate-200">Base de Dados de Jogadores</h3>
+                  <button 
+                    onClick={() => {
+                      if (window.confirm('Deseja resetar todos os jogadores para a lista inicial? Isso apagará jogadores novos.')) {
+                        setAllPlayers(INITIAL_PLAYERS);
+                        setWaitlist([]);
+                        setTeamA([]);
+                        setTeamB([]);
+                        setLockedPlayers(new Set());
+                      }
+                    }}
+                    className="text-[10px] text-slate-500 hover:text-rose-500 transition-colors"
+                  >
+                    RESETAR LISTA
+                  </button>
+                </div>
                 <div className="grid grid-cols-1 gap-2">
-                  {inactivePlayers.map(p => (
-                    <div key={p.id} className="p-3 rounded-xl bg-slate-800/50 border border-slate-800 hover:border-amber-500/30 transition-colors">
-                      {editingPlayerId === p.id ? (
-                        <div className="space-y-3">
-                          <div className="grid grid-cols-2 gap-2">
-                            <input 
-                              type="text" 
-                              value={editName}
-                              onChange={e => setEditName(e.target.value)}
-                              className="col-span-2 p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
-                            />
-                            <select 
-                              value={editGender}
-                              onChange={e => setEditGender(e.target.value as Gender)}
-                              className="p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
-                            >
-                              <option value="H">H</option>
-                              <option value="M">M</option>
-                            </select>
-                            <input 
-                              type="number" 
-                              step="0.01"
-                              value={editRating}
-                              onChange={e => setEditRating(e.target.value)}
-                              className="p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
-                            />
-                          </div>
-                          <div className="flex gap-2">
-                            <button 
-                              onClick={() => savePlayerEdit(p.id)}
-                              className="flex-1 py-2 bg-green-600 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1"
-                            >
-                              <Check className="w-3 h-3" /> SALVAR
-                            </button>
-                            <button 
-                              onClick={cancelEditing}
-                              className="flex-1 py-2 bg-slate-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1"
-                            >
-                              <X className="w-3 h-3" /> CANCELAR
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${p.gender === 'H' ? 'bg-blue-900/50 text-blue-400' : 'bg-pink-900/50 text-pink-400'}`}>
-                              {p.name[0]}
+                  {[...allPlayers].sort((a, b) => a.name.localeCompare(b.name)).map(p => {
+                    const isInGame = waitlist.includes(p.id) || teamA.some(tp => tp.id === p.id) || teamB.some(tp => tp.id === p.id);
+                    
+                    return (
+                      <div key={p.id} className="p-3 rounded-xl bg-slate-800/50 border border-slate-800 hover:border-amber-500/30 transition-colors">
+                        {editingPlayerId === p.id ? (
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-2 gap-2">
+                              <input 
+                                type="text" 
+                                value={editName}
+                                onChange={e => setEditName(e.target.value)}
+                                className="col-span-2 p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
+                              />
+                              <select 
+                                value={editGender}
+                                onChange={e => setEditGender(e.target.value as Gender)}
+                                className="p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
+                              >
+                                <option value="H">H</option>
+                                <option value="M">M</option>
+                              </select>
+                              <input 
+                                type="number" 
+                                step="0.01"
+                                value={editRating}
+                                onChange={e => setEditRating(e.target.value)}
+                                className="p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
+                              />
                             </div>
-                            <div>
-                              <p className="text-sm font-semibold text-slate-200">{p.name}</p>
-                              {showRatings && <p className="text-[10px] text-slate-500">Nota: {p.rating}</p>}
+                            <div className="flex gap-2">
+                              <button 
+                                onClick={() => savePlayerEdit(p.id)}
+                                className="flex-1 py-2 bg-green-600 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1"
+                              >
+                                <Check className="w-3 h-3" /> SALVAR
+                              </button>
+                              <button 
+                                onClick={cancelEditing}
+                                className="flex-1 py-2 bg-slate-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1"
+                              >
+                                <X className="w-3 h-3" /> CANCELAR
+                              </button>
                             </div>
                           </div>
-                          <div className="flex items-center gap-1">
-                            <button 
-                              onClick={() => startEditing(p)}
-                              className="p-2 text-slate-500 hover:bg-slate-700 rounded-lg transition-colors"
-                              title="Editar Jogador"
-                            >
-                              <Pencil className="w-4 h-4" />
-                            </button>
-                            <button 
-                              onClick={() => deletePlayer(p.id)}
-                              className="p-2 text-rose-500 hover:bg-rose-900/30 rounded-lg transition-colors"
-                              title="Excluir Jogador"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                            <button 
-                              onClick={() => addPlayerToGame(p.id)}
-                              className="p-2 bg-amber-500/10 text-amber-500 rounded-lg hover:bg-amber-500/20 transition-colors ml-2"
-                              title="Adicionar ao Jogo"
-                            >
-                              <UserPlus className="w-4 h-4" />
-                            </button>
+                        ) : (
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${p.gender === 'H' ? 'bg-blue-900/50 text-blue-400' : 'bg-pink-900/50 text-pink-400'}`}>
+                                {p.name[0]}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm font-semibold text-slate-200">{p.name}</p>
+                                  {isInGame && <span className="text-[8px] bg-amber-500/20 text-amber-500 px-1 rounded">EM JOGO</span>}
+                                </div>
+                                {showRatings && <p className="text-[10px] text-slate-500">Nota: {p.rating}</p>}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button 
+                                onClick={() => startEditing(p)}
+                                className="p-2 text-slate-500 hover:bg-slate-700 rounded-lg transition-colors"
+                                title="Editar Jogador"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                              <button 
+                                onClick={() => deletePlayer(p.id)}
+                                className="p-2 text-rose-500 hover:bg-rose-900/30 rounded-lg transition-colors"
+                                title="Excluir Jogador"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                              {!isInGame && (
+                                <button 
+                                  onClick={() => addPlayerToGame(p.id)}
+                                  className="p-2 bg-amber-500/10 text-amber-500 rounded-lg hover:bg-amber-500/20 transition-colors ml-2"
+                                  title="Adicionar ao Jogo"
+                                >
+                                  <UserPlus className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </motion.div>
