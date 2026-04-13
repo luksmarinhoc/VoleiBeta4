@@ -18,9 +18,10 @@ import {
   Pencil,
   Check,
   X,
-  UserMinus
+  UserMinus,
+  GripVertical
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, Reorder } from 'motion/react';
 
 export default function App() {
   const [allPlayers, setAllPlayers] = useState<Player[]>(() => {
@@ -451,23 +452,31 @@ export default function App() {
 
               {/* Status Alerts */}
               {(consecutiveWinsA >= 3 || consecutiveWinsB >= 3 || imbalance > 0.15) && (
-                <div className="bg-amber-950/30 border-l-4 border-amber-500 p-4 rounded-r-lg flex items-center justify-between">
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="bg-amber-500/10 border border-amber-500/50 p-4 rounded-xl flex items-center justify-between shadow-lg shadow-amber-500/5"
+                >
                   <div className="flex items-center gap-3">
-                    <Shuffle className="w-5 h-5 text-amber-500" />
+                    <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center">
+                      <Shuffle className="w-5 h-5 text-amber-500" />
+                    </div>
                     <div>
-                      <p className="text-amber-200 font-semibold text-sm">Sugestão de Mistura</p>
+                      <p className="text-amber-200 font-bold text-sm">Sugestão de Reequilíbrio</p>
                       <p className="text-amber-400/70 text-xs">
-                        {consecutiveWinsA >= 3 || consecutiveWinsB >= 3 ? "Gatilho de Vitórias (3+)" : "Gatilho de Desbalanceamento (>15%)"}
+                        {consecutiveWinsA >= 3 || consecutiveWinsB >= 3 
+                          ? `Sequência de vitórias: ${Math.max(consecutiveWinsA, consecutiveWinsB)} partidas` 
+                          : `Desequilíbrio técnico: ${(imbalance * 100).toFixed(1)}%`}
                       </p>
                     </div>
                   </div>
                   <button 
                     onClick={mixTeams}
-                    className="bg-amber-500 text-slate-950 px-3 py-1 rounded-md text-xs font-bold hover:bg-amber-400 transition-colors"
+                    className="bg-amber-500 text-slate-950 px-4 py-2 rounded-lg text-xs font-black hover:bg-amber-400 transition-all active:scale-95 shadow-md shadow-amber-500/20"
                   >
                     MISTURAR AGORA
                   </button>
-                </div>
+                </motion.div>
               )}
 
               {/* Teams Grid */}
@@ -477,7 +486,16 @@ export default function App() {
                   <div className="bg-amber-500 p-4 text-slate-950 flex justify-between items-center">
                     <div>
                       <h3 className="font-bold">Time A</h3>
-                      {showRatings && <p className="text-amber-900 text-xs">Soma: {teamAScore.toFixed(2)}</p>}
+                      {showRatings && (
+                        <div className="flex items-center gap-2">
+                          <p className="text-amber-900 text-xs font-medium">Soma: {teamAScore.toFixed(2)}</p>
+                          {imbalance > 0 && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${imbalance > 0.15 ? 'bg-rose-500/20 text-rose-900' : 'bg-amber-600/20 text-amber-900'}`}>
+                              Δ {(imbalance * 100).toFixed(0)}%
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs bg-amber-600/30 px-2 py-1 rounded-full">Vitórias: {consecutiveWinsA}</span>
@@ -527,7 +545,16 @@ export default function App() {
                   <div className="bg-white p-4 text-slate-950 flex justify-between items-center">
                     <div>
                       <h3 className="font-bold">Time B</h3>
-                      {showRatings && <p className="text-slate-500 text-xs">Soma: {teamBScore.toFixed(2)}</p>}
+                      {showRatings && (
+                        <div className="flex items-center gap-2">
+                          <p className="text-slate-500 text-xs font-medium">Soma: {teamBScore.toFixed(2)}</p>
+                          {imbalance > 0 && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${imbalance > 0.15 ? 'bg-rose-500/20 text-rose-600' : 'bg-slate-200 text-slate-500'}`}>
+                              Δ {(imbalance * 100).toFixed(0)}%
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs bg-slate-200 px-2 py-1 rounded-full">Vitórias: {consecutiveWinsB}</span>
@@ -598,7 +625,7 @@ export default function App() {
                   <RotateCcw className="w-5 h-5 text-amber-500" />
                   Próximos da Fila
                 </h3>
-                <div className="space-y-2">
+                <Reorder.Group axis="y" values={waitlist} onReorder={setWaitlist} className="space-y-2">
                   {waitlist.length === 0 ? (
                     <p className="text-slate-600 text-center py-12 text-sm italic">Ninguém na espera</p>
                   ) : (
@@ -606,8 +633,13 @@ export default function App() {
                       const p = allPlayers.find(ap => ap.id === id);
                       if (!p) return null;
                       return (
-                        <div key={p.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-800/50 border border-slate-800">
-                          <div className="flex items-center gap-4">
+                        <Reorder.Item 
+                          key={p.id} 
+                          value={p.id}
+                          className="flex items-center justify-between p-3 rounded-xl bg-slate-800/50 border border-slate-800 cursor-grab active:cursor-grabbing hover:border-amber-500/30 transition-colors group"
+                        >
+                          <div className="flex items-center gap-3">
+                            <GripVertical className="w-4 h-4 text-slate-600 group-hover:text-amber-500/50 transition-colors" />
                             <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ${p.gender === 'H' ? 'bg-blue-900/50 text-blue-400' : 'bg-pink-900/50 text-pink-400'}`}>
                               {p.name[0]}
                             </div>
@@ -621,25 +653,25 @@ export default function App() {
                           </div>
                           <div className="flex items-center gap-1">
                             <div className="flex flex-col gap-1 mr-2">
-                              <button onClick={() => moveInWaitlist(index, 'up')} className="p-1 hover:bg-slate-700 rounded text-slate-500"><ChevronUp className="w-4 h-4" /></button>
-                              <button onClick={() => moveInWaitlist(index, 'down')} className="p-1 hover:bg-slate-700 rounded text-slate-500"><ChevronDown className="w-4 h-4" /></button>
+                              <button onClick={(e) => { e.stopPropagation(); moveInWaitlist(index, 'up'); }} className="p-1 hover:bg-slate-700 rounded text-slate-500"><ChevronUp className="w-4 h-4" /></button>
+                              <button onClick={(e) => { e.stopPropagation(); moveInWaitlist(index, 'down'); }} className="p-1 hover:bg-slate-700 rounded text-slate-500"><ChevronDown className="w-4 h-4" /></button>
                             </div>
-                            <button onClick={() => toggleLock(p.id)} className={`p-2 rounded-lg transition-colors ${lockedPlayers.has(p.id) ? 'bg-amber-500/20 text-amber-500' : 'text-slate-600 hover:bg-slate-700'}`}>
+                            <button onClick={(e) => { e.stopPropagation(); toggleLock(p.id); }} className={`p-2 rounded-lg transition-colors ${lockedPlayers.has(p.id) ? 'bg-amber-500/20 text-amber-500' : 'text-slate-600 hover:bg-slate-700'}`}>
                               {lockedPlayers.has(p.id) ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
                             </button>
                             <button 
-                              onClick={() => removePlayerFromGame(p.id)} 
+                              onClick={(e) => { e.stopPropagation(); removePlayerFromGame(p.id); }} 
                               className="p-2 text-rose-500 hover:bg-rose-900/30 rounded-lg transition-colors"
                               title="Retirar do Jogo"
                             >
                               <UserMinus className="w-4 h-4" />
                             </button>
                           </div>
-                        </div>
+                        </Reorder.Item>
                       );
                     })
                   )}
-                </div>
+                </Reorder.Group>
               </div>
             </motion.div>
           )}
