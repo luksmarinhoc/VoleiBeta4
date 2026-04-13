@@ -230,7 +230,29 @@ export default function App() {
     });
   };
 
+  const updateWaitlistAndSyncNumbers = (newWaitlist: string[]) => {
+    // Get the pool of queue numbers currently in the waitlist
+    const playersInWaitlist = waitlist.map(id => allPlayers.find(p => p.id === id)).filter(Boolean) as Player[];
+    const currentNumbers = playersInWaitlist.map(p => p.queueNumber || 0).sort((a, b) => a - b);
+    
+    // Re-assign these numbers to the players in their new positions
+    const updatedAllPlayers = [...allPlayers];
+    newWaitlist.forEach((id, index) => {
+      const playerIndex = updatedAllPlayers.findIndex(p => p.id === id);
+      if (playerIndex !== -1 && index < currentNumbers.length) {
+        updatedAllPlayers[playerIndex] = {
+          ...updatedAllPlayers[playerIndex],
+          queueNumber: currentNumbers[index]
+        };
+      }
+    });
+    
+    setAllPlayers(updatedAllPlayers);
+    setWaitlist(newWaitlist);
+  };
+
   const moveInWaitlist = (index: number, direction: 'up' | 'down') => {
+    saveHistory();
     const newWaitlist = [...waitlist];
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= newWaitlist.length) return;
@@ -239,7 +261,7 @@ export default function App() {
     if (lockedPlayers.has(newWaitlist[index]) || lockedPlayers.has(newWaitlist[targetIndex])) return;
 
     [newWaitlist[index], newWaitlist[targetIndex]] = [newWaitlist[targetIndex], newWaitlist[index]];
-    setWaitlist(newWaitlist);
+    updateWaitlistAndSyncNumbers(newWaitlist);
   };
 
   const balanceTeams = (players: Player[]) => {
@@ -625,7 +647,7 @@ export default function App() {
                   <RotateCcw className="w-5 h-5 text-amber-500" />
                   Próximos da Fila
                 </h3>
-                <Reorder.Group axis="y" values={waitlist} onReorder={setWaitlist} className="space-y-2">
+                <Reorder.Group axis="y" values={waitlist} onReorder={updateWaitlistAndSyncNumbers} className="space-y-2">
                   {waitlist.length === 0 ? (
                     <p className="text-slate-600 text-center py-12 text-sm italic">Ninguém na espera</p>
                   ) : (
@@ -636,6 +658,7 @@ export default function App() {
                         <Reorder.Item 
                           key={p.id} 
                           value={p.id}
+                          onDragEnd={() => saveHistory()}
                           className="flex items-center justify-between p-3 rounded-xl bg-slate-800/50 border border-slate-800 cursor-grab active:cursor-grabbing hover:border-amber-500/30 transition-colors group"
                         >
                           <div className="flex items-center gap-3">
