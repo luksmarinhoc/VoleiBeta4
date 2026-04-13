@@ -87,6 +87,7 @@ export default function App() {
 
   // Editing State
   const [editingPlayerId, setEditingPlayerId] = useState<string | null>(null);
+  const [isBulkEditingRatings, setIsBulkEditingRatings] = useState(false);
   const [editName, setEditName] = useState('');
   const [editRating, setEditRating] = useState('');
   const [editGender, setEditGender] = useState<Gender>('H');
@@ -206,6 +207,12 @@ export default function App() {
         : p
     ));
     setEditingPlayerId(null);
+  };
+
+  const updatePlayerRating = (id: string, newRating: number) => {
+    setAllPlayers(prev => prev.map(p => p.id === id ? { ...p, rating: newRating } : p));
+    setTeamA(prev => prev.map(p => p.id === id ? { ...p, rating: newRating } : p));
+    setTeamB(prev => prev.map(p => p.id === id ? { ...p, rating: newRating } : p));
   };
 
   const deletePlayer = (id: string) => {
@@ -541,10 +548,28 @@ export default function App() {
                                 {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
                                 {p.name}
                               </p>
-                              {showRatings && <p className="text-[10px] text-slate-500">Nota: {p.rating}</p>}
+                              {showRatings && (
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[10px] text-slate-500">Nota:</span>
+                                  <input 
+                                    type="number" 
+                                    step="0.1"
+                                    value={p.rating}
+                                    onChange={(e) => updatePlayerRating(p.id, parseFloat(e.target.value) || 0)}
+                                    className="w-10 bg-transparent border-none text-[10px] text-amber-500 font-bold focus:ring-0 p-0"
+                                  />
+                                </div>
+                              )}
                             </div>
                           </div>
                           <div className="flex items-center gap-1">
+                            <button 
+                              onClick={() => startEditing(p)}
+                              className="p-1.5 text-slate-500 hover:bg-slate-700 rounded-md transition-colors"
+                              title="Editar Jogador"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
                             <button 
                               onClick={() => removePlayerFromGame(p.id)}
                               className="p-1.5 text-rose-500 hover:bg-rose-900/30 rounded-md transition-colors"
@@ -600,10 +625,28 @@ export default function App() {
                                 {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
                                 {p.name}
                               </p>
-                              {showRatings && <p className="text-[10px] text-slate-500">Nota: {p.rating}</p>}
+                              {showRatings && (
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[10px] text-slate-500">Nota:</span>
+                                  <input 
+                                    type="number" 
+                                    step="0.1"
+                                    value={p.rating}
+                                    onChange={(e) => updatePlayerRating(p.id, parseFloat(e.target.value) || 0)}
+                                    className="w-10 bg-transparent border-none text-[10px] text-amber-500 font-bold focus:ring-0 p-0"
+                                  />
+                                </div>
+                              )}
                             </div>
                           </div>
                           <div className="flex items-center gap-1">
+                            <button 
+                              onClick={() => startEditing(p)}
+                              className="p-1.5 text-slate-500 hover:bg-slate-700 rounded-md transition-colors"
+                              title="Editar Jogador"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
                             <button 
                               onClick={() => removePlayerFromGame(p.id)}
                               className="p-1.5 text-rose-500 hover:bg-rose-900/30 rounded-md transition-colors"
@@ -671,10 +714,28 @@ export default function App() {
                                 {index + 1}. {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
                                 {p.name}
                               </p>
-                              {showRatings && <p className="text-[10px] text-slate-500">Nota: {p.rating}</p>}
+                              {showRatings && (
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[10px] text-slate-500">Nota:</span>
+                                  <input 
+                                    type="number" 
+                                    step="0.1"
+                                    value={p.rating}
+                                    onChange={(e) => updatePlayerRating(p.id, parseFloat(e.target.value) || 0)}
+                                    className="w-10 bg-transparent border-none text-[10px] text-amber-500 font-bold focus:ring-0 p-0"
+                                  />
+                                </div>
+                              )}
                             </div>
                           </div>
                           <div className="flex items-center gap-1">
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); startEditing(p); }}
+                              className="p-2 text-slate-500 hover:bg-slate-700 rounded-lg transition-colors"
+                              title="Editar Jogador"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
                             <div className="flex flex-col gap-1 mr-2">
                               <button onClick={(e) => { e.stopPropagation(); moveInWaitlist(index, 'up'); }} className="p-1 hover:bg-slate-700 rounded text-slate-500"><ChevronUp className="w-4 h-4" /></button>
                               <button onClick={(e) => { e.stopPropagation(); moveInWaitlist(index, 'down'); }} className="p-1 hover:bg-slate-700 rounded text-slate-500"><ChevronDown className="w-4 h-4" /></button>
@@ -746,7 +807,15 @@ export default function App() {
               {/* Players List */}
               <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 p-4">
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="font-bold text-slate-200">Base de Dados de Jogadores</h3>
+                  <div>
+                    <h3 className="font-bold text-slate-200">Base de Dados de Jogadores</h3>
+                    <button 
+                      onClick={() => setIsBulkEditingRatings(!isBulkEditingRatings)}
+                      className={`text-[10px] font-bold px-2 py-1 rounded mt-1 transition-colors ${isBulkEditingRatings ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+                    >
+                      {isBulkEditingRatings ? 'CONCLUIR EDIÇÃO' : 'EDITAR TODAS AS NOTAS'}
+                    </button>
+                  </div>
                   <button 
                     onClick={() => {
                       if (window.confirm('Deseja resetar todos os jogadores para a lista inicial? Isso apagará jogadores novos e resetará a contagem da fila.')) {
@@ -832,7 +901,22 @@ export default function App() {
                                   </p>
                                   {isInGame && <span className="text-[8px] bg-amber-500/20 text-amber-500 px-1 rounded">EM JOGO</span>}
                                 </div>
-                                {showRatings && <p className="text-[10px] text-slate-500">Nota: {p.rating}</p>}
+                                {showRatings && (
+                                  isBulkEditingRatings ? (
+                                    <div className="flex items-center gap-1 mt-1">
+                                      <span className="text-[10px] text-slate-500">Nota:</span>
+                                      <input 
+                                        type="number" 
+                                        step="0.1"
+                                        value={p.rating}
+                                        onChange={(e) => updatePlayerRating(p.id, parseFloat(e.target.value) || 0)}
+                                        className="w-12 bg-slate-800 border border-slate-700 rounded px-1 text-[10px] text-amber-500 font-bold focus:ring-1 focus:ring-amber-500 outline-none"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <p className="text-[10px] text-slate-500">Nota: {p.rating}</p>
+                                  )
+                                )}
                               </div>
                             </div>
                             <div className="flex items-center gap-1">
