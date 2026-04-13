@@ -6,6 +6,7 @@ export interface Player {
   rating: number;
   gender: Gender;
   isGuest?: boolean;
+  queueNumber?: number;
 }
 
 export interface Team {
@@ -31,4 +32,6 @@ export interface HistoryEntry {
   teamB: Player[];
   consecutiveWinsA: number;
   consecutiveWinsB: number;
+  nextQueueNumber: number;
+  allPlayers: Player[];
 }

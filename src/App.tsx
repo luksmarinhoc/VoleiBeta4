@@ -52,36 +52,31 @@ export default function App() {
     const saved = localStorage.getItem('volei_locked');
     return saved ? new Set(JSON.parse(saved)) : new Set();
   });
+  const [nextQueueNumber, setNextQueueNumber] = useState(() => {
+    const saved = localStorage.getItem('volei_nextQueueNumber');
+    return saved ? parseInt(saved) : 1;
+  });
   const [history, setHistory] = useState<HistoryEntry[]>([]);
 
   // Persistence
   React.useEffect(() => {
     localStorage.setItem('volei_allPlayers', JSON.stringify(allPlayers));
-  }, [allPlayers]);
-
-  React.useEffect(() => {
     localStorage.setItem('volei_waitlist', JSON.stringify(waitlist));
-  }, [waitlist]);
-
-  React.useEffect(() => {
     localStorage.setItem('volei_teamA', JSON.stringify(teamA));
-  }, [teamA]);
-
-  React.useEffect(() => {
     localStorage.setItem('volei_teamB', JSON.stringify(teamB));
-  }, [teamB]);
-
-  React.useEffect(() => {
     localStorage.setItem('volei_winsA', consecutiveWinsA.toString());
-  }, [consecutiveWinsA]);
-
-  React.useEffect(() => {
     localStorage.setItem('volei_winsB', consecutiveWinsB.toString());
-  }, [consecutiveWinsB]);
-
-  React.useEffect(() => {
     localStorage.setItem('volei_locked', JSON.stringify(Array.from(lockedPlayers)));
-  }, [lockedPlayers]);
+    localStorage.setItem('volei_nextQueueNumber', nextQueueNumber.toString());
+  }, [allPlayers, waitlist, teamA, teamB, consecutiveWinsA, consecutiveWinsB, lockedPlayers, nextQueueNumber]);
+
+  // Safety check: if no players have a queue number, nextQueueNumber should be 1
+  React.useEffect(() => {
+    const hasQueueNumbers = allPlayers.some(p => p.queueNumber !== undefined);
+    if (!hasQueueNumbers && nextQueueNumber !== 1 && waitlist.length === 0 && teamA.length === 0 && teamB.length === 0) {
+      setNextQueueNumber(1);
+    }
+  }, [allPlayers, nextQueueNumber, waitlist.length, teamA.length, teamB.length]);
 
   // UI State
   const [newPlayerName, setNewPlayerName] = useState('');
@@ -103,10 +98,26 @@ export default function App() {
         teamB: [...teamB],
         consecutiveWinsA,
         consecutiveWinsB,
+        nextQueueNumber,
+        allPlayers: [...allPlayers],
       },
       ...prev.slice(0, 9) // Keep last 10 entries
     ]);
-  }, [waitlist, teamA, teamB, consecutiveWinsA, consecutiveWinsB]);
+  }, [waitlist, teamA, teamB, consecutiveWinsA, consecutiveWinsB, nextQueueNumber, allPlayers]);
+
+  const resetSession = () => {
+    if (window.confirm('Deseja resetar a partida? Isso removerá todos os jogadores da quadra e da espera, resetando a fila, mas MANTENDO as notas e nomes.')) {
+      saveHistory();
+      setTeamA([]);
+      setTeamB([]);
+      setWaitlist([]);
+      setConsecutiveWinsA(0);
+      setConsecutiveWinsB(0);
+      setNextQueueNumber(1);
+      setAllPlayers(prev => prev.map(p => ({ ...p, queueNumber: undefined })));
+      setLockedPlayers(new Set());
+    }
+  };
 
   const revertLastAction = () => {
     if (history.length === 0) return;
@@ -116,17 +127,31 @@ export default function App() {
     setTeamB(last.teamB);
     setConsecutiveWinsA(last.consecutiveWinsA);
     setConsecutiveWinsB(last.consecutiveWinsB);
+    setNextQueueNumber(last.nextQueueNumber);
+    setAllPlayers(last.allPlayers);
     setHistory(prev => prev.slice(1));
   };
 
   const addPlayerToGame = (id: string) => {
     if (waitlist.includes(id) || teamA.some(p => p.id === id) || teamB.some(p => p.id === id)) return;
     saveHistory();
+    
+    // Assign queue number
+    setAllPlayers(prev => prev.map(p => 
+      p.id === id ? { ...p, queueNumber: nextQueueNumber } : p
+    ));
+    setNextQueueNumber(prev => prev + 1);
+    
     setWaitlist(prev => [...prev, id]);
   };
 
   const removePlayerFromGame = (id: string) => {
     saveHistory();
+    // Clear queue number
+    setAllPlayers(prev => prev.map(p => 
+      p.id === id ? { ...p, queueNumber: undefined } : p
+    ));
+    
     setWaitlist(prev => prev.filter(pid => pid !== id));
     setTeamA(prev => prev.filter(p => p.id !== id));
     setTeamB(prev => prev.filter(p => p.id !== id));
@@ -219,33 +244,38 @@ export default function App() {
   const balanceTeams = (players: Player[]) => {
     if (players.length !== 12) return { teamA: [], teamB: [] };
 
-    // Sort by rating descending
+    // Sort by rating descending to balance power
     const sorted = [...players].sort((a, b) => b.rating - a.rating);
-    const women = sorted.filter(p => p.gender === 'M');
-    const men = sorted.filter(p => p.gender === 'H');
-
+    
     const tA: Player[] = [];
     const tB: Player[] = [];
 
-    // Distribute women equally
-    women.forEach((p, i) => {
-      if (i % 2 === 0) tA.push(p);
-      else tB.push(p);
-    });
-
-    // Distribute men to balance ratings
-    men.forEach(p => {
+    sorted.forEach(p => {
       const sumA = tA.reduce((acc, curr) => acc + curr.rating, 0);
       const sumB = tB.reduce((acc, curr) => acc + curr.rating, 0);
       
-      if (tA.length < 6 && (tB.length === 6 || sumA <= sumB)) {
+      const womenA = tA.filter(p => p.gender === 'M').length;
+      const womenB = tB.filter(p => p.gender === 'M').length;
+
+      // Balance logic:
+      // 1. Keep gender counts equal if possible
+      // 2. Keep total ratings balanced
+      const shouldGoToA = tA.length < 6 && (
+        tB.length === 6 || 
+        (p.gender === 'M' ? womenA <= womenB : sumA <= sumB)
+      );
+
+      if (shouldGoToA) {
         tA.push(p);
       } else {
         tB.push(p);
       }
     });
 
-    return { teamA: tA, teamB: tB };
+    return { 
+      teamA: tA.sort((a, b) => (a.queueNumber || 0) - (b.queueNumber || 0)), 
+      teamB: tB.sort((a, b) => (a.queueNumber || 0) - (b.queueNumber || 0)) 
+    };
   };
 
   const mixTeams = () => {
@@ -284,7 +314,6 @@ export default function App() {
   const handleWin = (winner: 'A' | 'B') => {
     saveHistory();
     const losingTeam = winner === 'A' ? teamB : teamA;
-    const winningTeam = winner === 'A' ? teamA : teamB;
     
     // Losers go to waitlist (unless locked)
     const losersToWaitlist = losingTeam
@@ -292,8 +321,6 @@ export default function App() {
       .map(p => p.id);
     
     const losersStaying = losingTeam.filter(p => lockedPlayers.has(p.id));
-    
-    setWaitlist(prev => [...prev, ...losersToWaitlist]);
     
     const newConsecutiveWins = (winner === 'A' ? consecutiveWinsA : consecutiveWinsB) + 1;
     if (winner === 'A') {
@@ -304,20 +331,9 @@ export default function App() {
       setConsecutiveWinsA(0);
     }
 
-    // Check for mix trigger
-    const sumA = teamA.reduce((acc, p) => acc + p.rating, 0);
-    const sumB = teamB.reduce((acc, p) => acc + p.rating, 0);
-    const diff = Math.abs(sumA - sumB) / Math.max(sumA, sumB);
-
-    if (newConsecutiveWins >= 3 || diff > 0.15) {
-      // Auto mix will happen after filling court if we want, 
-      // but usually we fill first then mix if triggered.
-      // For now, let's just rotate and let the user mix if they see the warning.
-    }
-
     // Prepare next game
-    const nextWaitlist = waitlist.filter(id => !losersToWaitlist.includes(id));
-    const availableFromWaitlist = nextWaitlist.slice(0, losersToWaitlist.length);
+    // Take players strictly by arrival order from waitlist
+    const availableFromWaitlist = waitlist.slice(0, losersToWaitlist.length);
     const newPlayers = availableFromWaitlist.map(id => allPlayers.find(p => p.id === id)!);
 
     if (winner === 'A') {
@@ -325,6 +341,8 @@ export default function App() {
     } else {
       setTeamA([...losersStaying, ...newPlayers]);
     }
+    
+    // Update waitlist: remove those who entered, add those who left
     setWaitlist(prev => prev.slice(availableFromWaitlist.length).concat(losersToWaitlist));
   };
 
@@ -365,6 +383,13 @@ export default function App() {
               title="Reverter Última Ação"
             >
               <RotateCcw className="w-5 h-5" />
+            </button>
+            <button 
+              onClick={resetSession}
+              className="p-2 hover:bg-rose-900/30 text-rose-500 rounded-full transition-colors"
+              title="Resetar Partida (Limpar Quadra e Espera)"
+            >
+              <Trash2 className="w-5 h-5" />
             </button>
           </div>
         </div>
@@ -450,7 +475,10 @@ export default function App() {
                               {p.name[0]}
                             </div>
                             <div>
-                              <p className="text-sm font-semibold text-slate-200">{p.name}</p>
+                              <p className="text-sm font-semibold text-slate-200">
+                                {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
+                                {p.name}
+                              </p>
                               {showRatings && <p className="text-[10px] text-slate-500">Nota: {p.rating}</p>}
                             </div>
                           </div>
@@ -497,7 +525,10 @@ export default function App() {
                               {p.name[0]}
                             </div>
                             <div>
-                              <p className="text-sm font-semibold text-slate-200">{p.name}</p>
+                              <p className="text-sm font-semibold text-slate-200">
+                                {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
+                                {p.name}
+                              </p>
                               {showRatings && <p className="text-[10px] text-slate-500">Nota: {p.rating}</p>}
                             </div>
                           </div>
@@ -559,7 +590,10 @@ export default function App() {
                               {p.name[0]}
                             </div>
                             <div>
-                              <p className="text-sm font-bold text-slate-200">{index + 1}. {p.name}</p>
+                              <p className="text-sm font-bold text-slate-200">
+                                {index + 1}. {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
+                                {p.name}
+                              </p>
                               {showRatings && <p className="text-[10px] text-slate-500">Nota: {p.rating}</p>}
                             </div>
                           </div>
@@ -638,12 +672,14 @@ export default function App() {
                   <h3 className="font-bold text-slate-200">Base de Dados de Jogadores</h3>
                   <button 
                     onClick={() => {
-                      if (window.confirm('Deseja resetar todos os jogadores para a lista inicial? Isso apagará jogadores novos.')) {
+                      if (window.confirm('Deseja resetar todos os jogadores para a lista inicial? Isso apagará jogadores novos e resetará a contagem da fila.')) {
+                        saveHistory();
                         setAllPlayers(INITIAL_PLAYERS);
                         setWaitlist([]);
                         setTeamA([]);
                         setTeamB([]);
                         setLockedPlayers(new Set());
+                        setNextQueueNumber(1);
                       }
                     }}
                     className="text-[10px] text-slate-500 hover:text-rose-500 transition-colors"
@@ -652,7 +688,15 @@ export default function App() {
                   </button>
                 </div>
                 <div className="grid grid-cols-1 gap-2">
-                  {[...allPlayers].sort((a, b) => a.name.localeCompare(b.name)).map(p => {
+                  {[...allPlayers].sort((a, b) => {
+                    const aInGame = waitlist.includes(a.id) || teamA.some(tp => tp.id === a.id) || teamB.some(tp => tp.id === a.id);
+                    const bInGame = waitlist.includes(b.id) || teamA.some(tp => tp.id === b.id) || teamB.some(tp => tp.id === b.id);
+                    
+                    if (aInGame && bInGame) return (a.queueNumber || 0) - (b.queueNumber || 0);
+                    if (aInGame && !bInGame) return -1;
+                    if (!aInGame && bInGame) return 1;
+                    return a.name.localeCompare(b.name);
+                  }).map(p => {
                     const isInGame = waitlist.includes(p.id) || teamA.some(tp => tp.id === p.id) || teamB.some(tp => tp.id === p.id);
                     
                     return (
@@ -705,7 +749,10 @@ export default function App() {
                               </div>
                               <div>
                                 <div className="flex items-center gap-2">
-                                  <p className="text-sm font-semibold text-slate-200">{p.name}</p>
+                                  <p className="text-sm font-semibold text-slate-200">
+                                    {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
+                                    {p.name}
+                                  </p>
                                   {isInGame && <span className="text-[8px] bg-amber-500/20 text-amber-500 px-1 rounded">EM JOGO</span>}
                                 </div>
                                 {showRatings && <p className="text-[10px] text-slate-500">Nota: {p.rating}</p>}
