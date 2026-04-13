@@ -242,30 +242,32 @@ export default function App() {
   };
 
   const balanceTeams = (players: Player[]) => {
-    if (players.length !== 12) return { teamA: [], teamB: [] };
+    if (players.length === 0) return { teamA: [], teamB: [] };
 
-    // Sort by rating descending to balance power
-    const sorted = [...players].sort((a, b) => b.rating - a.rating);
-    
+    const half = Math.ceil(players.length / 2);
+    const women = players.filter(p => p.gender === 'M').sort((a, b) => b.rating - a.rating);
+    const men = players.filter(p => p.gender === 'H').sort((a, b) => b.rating - a.rating);
+
     const tA: Player[] = [];
     const tB: Player[] = [];
 
-    sorted.forEach(p => {
+    // Distribute women first to ensure gender balance
+    women.forEach((p, i) => {
+      if (tA.length < half && (tB.length === half || tA.length <= tB.length)) {
+        tA.push(p);
+      } else if (tB.length < half) {
+        tB.push(p);
+      } else {
+        tA.push(p);
+      }
+    });
+
+    // Distribute men to balance ratings
+    men.forEach(p => {
       const sumA = tA.reduce((acc, curr) => acc + curr.rating, 0);
       const sumB = tB.reduce((acc, curr) => acc + curr.rating, 0);
-      
-      const womenA = tA.filter(p => p.gender === 'M').length;
-      const womenB = tB.filter(p => p.gender === 'M').length;
 
-      // Balance logic:
-      // 1. Keep gender counts equal if possible
-      // 2. Keep total ratings balanced
-      const shouldGoToA = tA.length < 6 && (
-        tB.length === 6 || 
-        (p.gender === 'M' ? womenA <= womenB : sumA <= sumB)
-      );
-
-      if (shouldGoToA) {
+      if (tA.length < half && (tB.length === half || sumA <= sumB)) {
         tA.push(p);
       } else {
         tB.push(p);
@@ -280,7 +282,7 @@ export default function App() {
 
   const mixTeams = () => {
     const onCourt = [...teamA, ...teamB];
-    if (onCourt.length < 12) return;
+    if (onCourt.length === 0) return;
     saveHistory();
     const { teamA: newA, teamB: newB } = balanceTeams(onCourt);
     setTeamA(newA);
@@ -427,6 +429,26 @@ export default function App() {
               exit={{ opacity: 0, y: -10 }}
               className="space-y-6"
             >
+              {/* Action Buttons */}
+              <div className="flex gap-3">
+                <button 
+                  onClick={mixTeams}
+                  disabled={teamA.length + teamB.length === 0}
+                  className="flex-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:hover:bg-slate-800 text-amber-500 py-3 rounded-xl border border-slate-700 flex items-center justify-center gap-2 font-bold transition-all"
+                >
+                  <Shuffle className="w-5 h-5" />
+                  MEXER NAS EQUIPES
+                </button>
+                <button 
+                  onClick={fillCourt}
+                  disabled={waitlist.length === 0 || (teamA.length === 6 && teamB.length === 6)}
+                  className="flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:hover:bg-amber-500 text-slate-950 py-3 rounded-xl flex items-center justify-center gap-2 font-bold shadow-lg shadow-amber-500/20 transition-all"
+                >
+                  <UserPlus className="w-5 h-5" />
+                  COMPLETAR QUADRA
+                </button>
+              </div>
+
               {/* Status Alerts */}
               {(consecutiveWinsA >= 3 || consecutiveWinsB >= 3 || imbalance > 0.15) && (
                 <div className="bg-amber-950/30 border-l-4 border-amber-500 p-4 rounded-r-lg flex items-center justify-between">
