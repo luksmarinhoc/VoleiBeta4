@@ -19,7 +19,8 @@ import {
   Check,
   X,
   UserMinus,
-  GripVertical
+  GripVertical,
+  ArrowLeftRight
 } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 
@@ -149,18 +150,40 @@ export default function App() {
 
   const removePlayerFromGame = (id: string) => {
     saveHistory();
+    
+    let fromTeam: 'A' | 'B' | null = null;
+    if (teamA.some(p => p.id === id)) fromTeam = 'A';
+    else if (teamB.some(p => p.id === id)) fromTeam = 'B';
+
     // Clear queue number
     setAllPlayers(prev => prev.map(p => 
       p.id === id ? { ...p, queueNumber: undefined } : p
     ));
     
-    setWaitlist(prev => prev.filter(pid => pid !== id));
-    setTeamA(prev => prev.filter(p => p.id !== id));
-    setTeamB(prev => prev.filter(p => p.id !== id));
     setLockedPlayers(prev => {
       const next = new Set(prev);
       next.delete(id);
       return next;
+    });
+
+    setWaitlist(prev => {
+      const filteredWaitlist = prev.filter(pid => pid !== id);
+      
+      if (fromTeam && filteredWaitlist.length > 0) {
+        const nextId = filteredWaitlist[0];
+        const nextPlayer = allPlayers.find(p => p.id === nextId);
+        if (nextPlayer) {
+          if (fromTeam === 'A') setTeamA(t => [...t.filter(p => p.id !== id), nextPlayer]);
+          else setTeamB(t => [...t.filter(p => p.id !== id), nextPlayer]);
+          return filteredWaitlist.slice(1);
+        }
+      }
+
+      // Default removal if no one in waitlist or not in a team
+      if (fromTeam === 'A') setTeamA(t => t.filter(p => p.id !== id));
+      if (fromTeam === 'B') setTeamB(t => t.filter(p => p.id !== id));
+      
+      return filteredWaitlist;
     });
   };
 
@@ -269,6 +292,42 @@ export default function App() {
 
     [newWaitlist[index], newWaitlist[targetIndex]] = [newWaitlist[targetIndex], newWaitlist[index]];
     updateWaitlistAndSyncNumbers(newWaitlist);
+  };
+
+  const moveInTeam = (team: 'A' | 'B', index: number, direction: 'up' | 'down') => {
+    saveHistory();
+    const currentTeam = team === 'A' ? [...teamA] : [...teamB];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= currentTeam.length) return;
+    
+    // Check if either player is locked
+    if (lockedPlayers.has(currentTeam[index].id) || lockedPlayers.has(currentTeam[targetIndex].id)) return;
+
+    [currentTeam[index], currentTeam[targetIndex]] = [currentTeam[targetIndex], currentTeam[index]];
+    if (team === 'A') setTeamA(currentTeam);
+    else setTeamB(currentTeam);
+  };
+
+  const onReorderTeam = (team: 'A' | 'B', newOrder: Player[]) => {
+    // Check if any locked player changed their relative position
+    // This is complex with Reorder.Group, so we'll just allow it for now
+    // but prevent dragging locked players via dragListener
+    if (team === 'A') setTeamA(newOrder);
+    else setTeamB(newOrder);
+  };
+
+  const switchTeam = (id: string) => {
+    saveHistory();
+    const playerA = teamA.find(p => p.id === id);
+    const playerB = teamB.find(p => p.id === id);
+
+    if (playerA) {
+      setTeamA(prev => prev.filter(p => p.id !== id));
+      setTeamB(prev => [...prev, playerA]);
+    } else if (playerB) {
+      setTeamB(prev => prev.filter(p => p.id !== id));
+      setTeamA(prev => [...prev, playerB]);
+    }
   };
 
   const balanceTeams = (players: Player[]) => {
@@ -537,52 +596,84 @@ export default function App() {
                     {teamA.length === 0 ? (
                       <p className="text-slate-600 text-center py-8 text-sm italic">Vazio</p>
                     ) : (
-                      teamA.map(p => (
-                        <div key={p.id} className="flex items-center justify-between p-2 rounded-lg bg-slate-800/50 border border-slate-800 group">
-                          <div className="flex items-center gap-3">
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${p.gender === 'H' ? 'bg-blue-900/50 text-blue-400' : 'bg-pink-900/50 text-pink-400'}`}>
-                              {p.name[0]}
+                      <Reorder.Group axis="y" values={teamA} onReorder={(newOrder) => onReorderTeam('A', newOrder)} className="space-y-2">
+                        {teamA.map((p, index) => (
+                          <Reorder.Item 
+                            key={p.id} 
+                            value={p}
+                            dragListener={!lockedPlayers.has(p.id)}
+                            onDragEnd={() => saveHistory()}
+                            className="flex items-center justify-between p-2 rounded-lg bg-slate-800/50 border border-slate-800 group"
+                          >
+                            <div className="flex items-center gap-3">
+                              <GripVertical className={`w-3.5 h-3.5 ${lockedPlayers.has(p.id) ? 'text-slate-800' : 'text-slate-600 group-hover:text-amber-500/50'} transition-colors`} />
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${p.gender === 'H' ? 'bg-blue-900/50 text-blue-400' : 'bg-pink-900/50 text-pink-400'}`}>
+                                {p.name[0]}
+                              </div>
+                              <div>
+                                <p className="text-sm font-semibold text-slate-200">
+                                  {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
+                                  {p.name}
+                                </p>
+                                {showRatings && (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[10px] text-slate-500">Nota:</span>
+                                    <input 
+                                      type="number" 
+                                      step="0.1"
+                                      value={p.rating}
+                                      onChange={(e) => updatePlayerRating(p.id, parseFloat(e.target.value) || 0)}
+                                      className="w-10 bg-transparent border-none text-[10px] text-amber-500 font-bold focus:ring-0 p-0"
+                                    />
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                            <div>
-                              <p className="text-sm font-semibold text-slate-200">
-                                {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
-                                {p.name}
-                              </p>
-                              {showRatings && (
-                                <div className="flex items-center gap-1">
-                                  <span className="text-[10px] text-slate-500">Nota:</span>
-                                  <input 
-                                    type="number" 
-                                    step="0.1"
-                                    value={p.rating}
-                                    onChange={(e) => updatePlayerRating(p.id, parseFloat(e.target.value) || 0)}
-                                    className="w-10 bg-transparent border-none text-[10px] text-amber-500 font-bold focus:ring-0 p-0"
-                                  />
-                                </div>
-                              )}
+                            <div className="flex items-center gap-1">
+                              <div className="flex flex-col gap-0.5 mr-1">
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); moveInTeam('A', index, 'up'); }} 
+                                  disabled={lockedPlayers.has(p.id)}
+                                  className={`p-0.5 rounded transition-colors ${lockedPlayers.has(p.id) ? 'text-slate-800' : 'hover:bg-slate-700 text-slate-500'}`}
+                                >
+                                  <ChevronUp className="w-3 h-3" />
+                                </button>
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); moveInTeam('A', index, 'down'); }} 
+                                  disabled={lockedPlayers.has(p.id)}
+                                  className={`p-0.5 rounded transition-colors ${lockedPlayers.has(p.id) ? 'text-slate-800' : 'hover:bg-slate-700 text-slate-500'}`}
+                                >
+                                  <ChevronDown className="w-3 h-3" />
+                                </button>
+                              </div>
+                              <button 
+                                onClick={() => startEditing(p)}
+                                className="p-1.5 text-slate-500 hover:bg-slate-700 rounded-md transition-colors"
+                                title="Editar Jogador"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button 
+                                onClick={() => switchTeam(p.id)}
+                                className="p-1.5 text-amber-500 hover:bg-amber-500/10 rounded-md transition-colors"
+                                title="Mudar de Time"
+                              >
+                                <ArrowLeftRight className="w-3.5 h-3.5" />
+                              </button>
+                              <button 
+                                onClick={() => removePlayerFromGame(p.id)}
+                                className="p-1.5 text-rose-500 hover:bg-rose-900/30 rounded-md transition-colors"
+                                title="Retirar da Quadra"
+                              >
+                                <UserMinus className="w-3.5 h-3.5" />
+                              </button>
+                              <button onClick={() => toggleLock(p.id)} className={`p-1.5 rounded-md transition-colors ${lockedPlayers.has(p.id) ? 'bg-amber-500/20 text-amber-500' : 'text-slate-600 hover:bg-slate-700'}`}>
+                                {lockedPlayers.has(p.id) ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                              </button>
                             </div>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <button 
-                              onClick={() => startEditing(p)}
-                              className="p-1.5 text-slate-500 hover:bg-slate-700 rounded-md transition-colors"
-                              title="Editar Jogador"
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                            </button>
-                            <button 
-                              onClick={() => removePlayerFromGame(p.id)}
-                              className="p-1.5 text-rose-500 hover:bg-rose-900/30 rounded-md transition-colors"
-                              title="Retirar da Quadra"
-                            >
-                              <UserMinus className="w-3.5 h-3.5" />
-                            </button>
-                            <button onClick={() => toggleLock(p.id)} className={`p-1.5 rounded-md transition-colors ${lockedPlayers.has(p.id) ? 'bg-amber-500/20 text-amber-500' : 'text-slate-600 hover:bg-slate-700'}`}>
-                              {lockedPlayers.has(p.id) ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-                            </button>
-                          </div>
-                        </div>
-                      ))
+                          </Reorder.Item>
+                        ))}
+                      </Reorder.Group>
                     )}
                   </div>
                 </div>
@@ -614,52 +705,84 @@ export default function App() {
                     {teamB.length === 0 ? (
                       <p className="text-slate-600 text-center py-8 text-sm italic">Vazio</p>
                     ) : (
-                      teamB.map(p => (
-                        <div key={p.id} className="flex items-center justify-between p-2 rounded-lg bg-slate-800/50 border border-slate-800 group">
-                          <div className="flex items-center gap-3">
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${p.gender === 'H' ? 'bg-blue-900/50 text-blue-400' : 'bg-pink-900/50 text-pink-400'}`}>
-                              {p.name[0]}
+                      <Reorder.Group axis="y" values={teamB} onReorder={(newOrder) => onReorderTeam('B', newOrder)} className="space-y-2">
+                        {teamB.map((p, index) => (
+                          <Reorder.Item 
+                            key={p.id} 
+                            value={p}
+                            dragListener={!lockedPlayers.has(p.id)}
+                            onDragEnd={() => saveHistory()}
+                            className="flex items-center justify-between p-2 rounded-lg bg-slate-800/50 border border-slate-800 group"
+                          >
+                            <div className="flex items-center gap-3">
+                              <GripVertical className={`w-3.5 h-3.5 ${lockedPlayers.has(p.id) ? 'text-slate-800' : 'text-slate-600 group-hover:text-amber-500/50'} transition-colors`} />
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${p.gender === 'H' ? 'bg-blue-900/50 text-blue-400' : 'bg-pink-900/50 text-pink-400'}`}>
+                                {p.name[0]}
+                              </div>
+                              <div>
+                                <p className="text-sm font-semibold text-slate-200">
+                                  {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
+                                  {p.name}
+                                </p>
+                                {showRatings && (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[10px] text-slate-500">Nota:</span>
+                                    <input 
+                                      type="number" 
+                                      step="0.1"
+                                      value={p.rating}
+                                      onChange={(e) => updatePlayerRating(p.id, parseFloat(e.target.value) || 0)}
+                                      className="w-10 bg-transparent border-none text-[10px] text-amber-500 font-bold focus:ring-0 p-0"
+                                    />
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                            <div>
-                              <p className="text-sm font-semibold text-slate-200">
-                                {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
-                                {p.name}
-                              </p>
-                              {showRatings && (
-                                <div className="flex items-center gap-1">
-                                  <span className="text-[10px] text-slate-500">Nota:</span>
-                                  <input 
-                                    type="number" 
-                                    step="0.1"
-                                    value={p.rating}
-                                    onChange={(e) => updatePlayerRating(p.id, parseFloat(e.target.value) || 0)}
-                                    className="w-10 bg-transparent border-none text-[10px] text-amber-500 font-bold focus:ring-0 p-0"
-                                  />
-                                </div>
-                              )}
+                            <div className="flex items-center gap-1">
+                              <div className="flex flex-col gap-0.5 mr-1">
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); moveInTeam('B', index, 'up'); }} 
+                                  disabled={lockedPlayers.has(p.id)}
+                                  className={`p-0.5 rounded transition-colors ${lockedPlayers.has(p.id) ? 'text-slate-800' : 'hover:bg-slate-700 text-slate-500'}`}
+                                >
+                                  <ChevronUp className="w-3 h-3" />
+                                </button>
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); moveInTeam('B', index, 'down'); }} 
+                                  disabled={lockedPlayers.has(p.id)}
+                                  className={`p-0.5 rounded transition-colors ${lockedPlayers.has(p.id) ? 'text-slate-800' : 'hover:bg-slate-700 text-slate-500'}`}
+                                >
+                                  <ChevronDown className="w-3 h-3" />
+                                </button>
+                              </div>
+                              <button 
+                                onClick={() => startEditing(p)}
+                                className="p-1.5 text-slate-500 hover:bg-slate-700 rounded-md transition-colors"
+                                title="Editar Jogador"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button 
+                                onClick={() => switchTeam(p.id)}
+                                className="p-1.5 text-amber-500 hover:bg-amber-500/10 rounded-md transition-colors"
+                                title="Mudar de Time"
+                              >
+                                <ArrowLeftRight className="w-3.5 h-3.5" />
+                              </button>
+                              <button 
+                                onClick={() => removePlayerFromGame(p.id)}
+                                className="p-1.5 text-rose-500 hover:bg-rose-900/30 rounded-md transition-colors"
+                                title="Retirar da Quadra"
+                              >
+                                <UserMinus className="w-3.5 h-3.5" />
+                              </button>
+                              <button onClick={() => toggleLock(p.id)} className={`p-1.5 rounded-md transition-colors ${lockedPlayers.has(p.id) ? 'bg-amber-500/20 text-amber-500' : 'text-slate-600 hover:bg-slate-700'}`}>
+                                {lockedPlayers.has(p.id) ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                              </button>
                             </div>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <button 
-                              onClick={() => startEditing(p)}
-                              className="p-1.5 text-slate-500 hover:bg-slate-700 rounded-md transition-colors"
-                              title="Editar Jogador"
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                            </button>
-                            <button 
-                              onClick={() => removePlayerFromGame(p.id)}
-                              className="p-1.5 text-rose-500 hover:bg-rose-900/30 rounded-md transition-colors"
-                              title="Retirar da Quadra"
-                            >
-                              <UserMinus className="w-3.5 h-3.5" />
-                            </button>
-                            <button onClick={() => toggleLock(p.id)} className={`p-1.5 rounded-md transition-colors ${lockedPlayers.has(p.id) ? 'bg-amber-500/20 text-amber-500' : 'text-slate-600 hover:bg-slate-700'}`}>
-                              {lockedPlayers.has(p.id) ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-                            </button>
-                          </div>
-                        </div>
-                      ))
+                          </Reorder.Item>
+                        ))}
+                      </Reorder.Group>
                     )}
                   </div>
                 </div>
@@ -701,11 +824,12 @@ export default function App() {
                         <Reorder.Item 
                           key={p.id} 
                           value={p.id}
+                          dragListener={!lockedPlayers.has(p.id)}
                           onDragEnd={() => saveHistory()}
                           className="flex items-center justify-between p-3 rounded-xl bg-slate-800/50 border border-slate-800 cursor-grab active:cursor-grabbing hover:border-amber-500/30 transition-colors group"
                         >
                           <div className="flex items-center gap-3">
-                            <GripVertical className="w-4 h-4 text-slate-600 group-hover:text-amber-500/50 transition-colors" />
+                            <GripVertical className={`w-4 h-4 ${lockedPlayers.has(p.id) ? 'text-slate-800' : 'text-slate-600 group-hover:text-amber-500/50'} transition-colors`} />
                             <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ${p.gender === 'H' ? 'bg-blue-900/50 text-blue-400' : 'bg-pink-900/50 text-pink-400'}`}>
                               {p.name[0]}
                             </div>
@@ -737,8 +861,20 @@ export default function App() {
                               <Pencil className="w-4 h-4" />
                             </button>
                             <div className="flex flex-col gap-1 mr-2">
-                              <button onClick={(e) => { e.stopPropagation(); moveInWaitlist(index, 'up'); }} className="p-1 hover:bg-slate-700 rounded text-slate-500"><ChevronUp className="w-4 h-4" /></button>
-                              <button onClick={(e) => { e.stopPropagation(); moveInWaitlist(index, 'down'); }} className="p-1 hover:bg-slate-700 rounded text-slate-500"><ChevronDown className="w-4 h-4" /></button>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); moveInWaitlist(index, 'up'); }} 
+                                disabled={lockedPlayers.has(p.id)}
+                                className={`p-1 rounded transition-colors ${lockedPlayers.has(p.id) ? 'text-slate-800' : 'hover:bg-slate-700 text-slate-500'}`}
+                              >
+                                <ChevronUp className="w-4 h-4" />
+                              </button>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); moveInWaitlist(index, 'down'); }} 
+                                disabled={lockedPlayers.has(p.id)}
+                                className={`p-1 rounded transition-colors ${lockedPlayers.has(p.id) ? 'text-slate-800' : 'hover:bg-slate-700 text-slate-500'}`}
+                              >
+                                <ChevronDown className="w-4 h-4" />
+                              </button>
                             </div>
                             <button onClick={(e) => { e.stopPropagation(); toggleLock(p.id); }} className={`p-2 rounded-lg transition-colors ${lockedPlayers.has(p.id) ? 'bg-amber-500/20 text-amber-500' : 'text-slate-600 hover:bg-slate-700'}`}>
                               {lockedPlayers.has(p.id) ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
