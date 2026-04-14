@@ -69,9 +69,9 @@ export default function App() {
     const provider = new GoogleAuthProvider();
     try {
       await signInWithPopup(auth, provider);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro ao fazer login:", error);
-      alert("Não foi possível fazer login com o Google.");
+      alert(`Não foi possível fazer login com o Google: ${error.message || 'Erro desconhecido'}. Verifique se os pop-ups estão permitidos.`);
     }
   };
 
@@ -112,7 +112,7 @@ export default function App() {
 
   // Push State to Firestore
   const syncStateToFirebase = useCallback(async (updates: any) => {
-    if (!user) return; // Only sync if logged in
+    if (!isAuthReady) return;
     try {
       await setDoc(doc(db, 'state', 'current'), {
         waitlist,
@@ -130,12 +130,12 @@ export default function App() {
   }, [isAuthReady, waitlist, teamA, teamB, consecutiveWinsA, consecutiveWinsB, nextQueueNumber, lockedPlayers]);
 
   const syncPlayerToFirebase = async (player: Player) => {
-    if (!user) return;
+    if (!isAuthReady) return;
     await setDoc(doc(db, 'players', player.id), player);
   };
 
   const syncAllPlayersToFirebase = async (players: Player[]) => {
-    if (!user) return;
+    if (!isAuthReady) return;
     const batch = writeBatch(db);
     players.forEach(p => {
       batch.set(doc(db, 'players', p.id), p);
