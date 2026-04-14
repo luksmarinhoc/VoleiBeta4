@@ -11,7 +11,12 @@ import {
   writeBatch,
   getDocFromServer
 } from 'firebase/firestore';
-import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  onAuthStateChanged,
+  User as FirebaseUser 
+} from 'firebase/auth';
 import { 
   Users, 
   UserPlus, 
@@ -25,18 +30,21 @@ import {
   Trash2,
   ChevronUp,
   ChevronDown,
-  User,
+  User as UserIcon,
   Pencil,
   Check,
   X,
   UserMinus,
   GripVertical,
-  ArrowLeftRight
+  ArrowLeftRight,
+  LogIn,
+  LogOut
 } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 
 export default function App() {
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [user, setUser] = useState<FirebaseUser | null>(null);
   const [allPlayers, setAllPlayers] = useState<Player[]>(INITIAL_PLAYERS);
   const [waitlist, setWaitlist] = useState<string[]>([]);
   const [teamA, setTeamA] = useState<Player[]>([]);
@@ -50,15 +58,24 @@ export default function App() {
 
   // Firebase Auth Setup
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (!user) {
-        signInAnonymously(auth).catch(console.error);
-      } else {
-        setIsAuthReady(true);
-      }
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setIsAuthReady(true);
     });
     return () => unsubscribe();
   }, []);
+
+  const handleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error("Erro ao fazer login:", error);
+      alert("Não foi possível fazer login com o Google.");
+    }
+  };
+
+  const handleLogout = () => auth.signOut();
 
   // Sync Players from Firestore
   useEffect(() => {
@@ -95,7 +112,7 @@ export default function App() {
 
   // Push State to Firestore
   const syncStateToFirebase = useCallback(async (updates: any) => {
-    if (!isAuthReady) return;
+    if (!user) return; // Only sync if logged in
     try {
       await setDoc(doc(db, 'state', 'current'), {
         waitlist,
@@ -113,12 +130,12 @@ export default function App() {
   }, [isAuthReady, waitlist, teamA, teamB, consecutiveWinsA, consecutiveWinsB, nextQueueNumber, lockedPlayers]);
 
   const syncPlayerToFirebase = async (player: Player) => {
-    if (!isAuthReady) return;
+    if (!user) return;
     await setDoc(doc(db, 'players', player.id), player);
   };
 
   const syncAllPlayersToFirebase = async (players: Player[]) => {
-    if (!isAuthReady) return;
+    if (!user) return;
     const batch = writeBatch(db);
     players.forEach(p => {
       batch.set(doc(db, 'players', p.id), p);
@@ -611,7 +628,32 @@ export default function App() {
             <Trophy className="w-6 h-6 text-amber-500" />
             <h1 className="text-xl font-bold tracking-tight">Gestor de Vôlei v3.0</h1>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
+            {user ? (
+              <div className="flex items-center gap-2">
+                <img 
+                  src={user.photoURL || ''} 
+                  alt={user.displayName || ''} 
+                  className="w-8 h-8 rounded-full border border-amber-500"
+                  referrerPolicy="no-referrer"
+                />
+                <button 
+                  onClick={handleLogout}
+                  className="p-2 hover:bg-rose-900/30 text-rose-500 rounded-full transition-colors"
+                  title="Sair"
+                >
+                  <LogOut className="w-5 h-5" />
+                </button>
+              </div>
+            ) : (
+              <button 
+                onClick={handleLogin}
+                className="flex items-center gap-2 bg-amber-500 text-slate-950 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-amber-400 transition-all"
+              >
+                <LogIn className="w-4 h-4" /> ENTRAR
+              </button>
+            )}
+            <div className="w-px h-6 bg-slate-800 mx-1" />
             <button 
               onClick={() => setShowRatings(!showRatings)}
               className="p-2 hover:bg-slate-800 rounded-full transition-colors"
