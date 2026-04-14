@@ -81,13 +81,24 @@ export default function App() {
   useEffect(() => {
     if (!isAuthReady) return;
     
-    // Bootstrap: Check if Firestore is empty, if so, upload initial players
     const bootstrapPlayers = async () => {
-      const snapshot = await getDocs(collection(db, 'players'));
-      if (snapshot.empty) {
-        await syncAllPlayersToFirebase(INITIAL_PLAYERS);
+      try {
+        const snapshot = await getDocs(collection(db, 'players'));
+        const existingIds = new Set();
+        snapshot.forEach(doc => existingIds.add(doc.id));
+        
+        // Find players that are in INITIAL_PLAYERS but NOT in Firestore
+        const missingPlayers = INITIAL_PLAYERS.filter(p => !existingIds.has(p.id));
+        
+        if (missingPlayers.length > 0) {
+          console.log(`Subindo ${missingPlayers.length} jogadores faltantes para o banco...`);
+          await syncAllPlayersToFirebase(missingPlayers);
+        }
+      } catch (error) {
+        console.error("Erro no bootstrap de jogadores:", error);
       }
     };
+    
     bootstrapPlayers();
 
     const unsubscribe = onSnapshot(collection(db, 'players'), (snapshot) => {
@@ -97,7 +108,8 @@ export default function App() {
       });
       
       if (players.length > 0) {
-        setAllPlayers(players);
+        // Sort by name to keep UI consistent
+        setAllPlayers(players.sort((a, b) => a.name.localeCompare(b.name)));
       }
     });
     return () => unsubscribe();
