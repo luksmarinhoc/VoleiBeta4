@@ -80,11 +80,22 @@ export default function App() {
   // Sync Players from Firestore
   useEffect(() => {
     if (!isAuthReady) return;
+    
+    // Bootstrap: Check if Firestore is empty, if so, upload initial players
+    const bootstrapPlayers = async () => {
+      const snapshot = await getDocs(collection(db, 'players'));
+      if (snapshot.empty) {
+        await syncAllPlayersToFirebase(INITIAL_PLAYERS);
+      }
+    };
+    bootstrapPlayers();
+
     const unsubscribe = onSnapshot(collection(db, 'players'), (snapshot) => {
       const players: Player[] = [];
       snapshot.forEach((doc) => {
         players.push(doc.data() as Player);
       });
+      
       if (players.length > 0) {
         setAllPlayers(players);
       }
