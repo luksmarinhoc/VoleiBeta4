@@ -259,10 +259,16 @@ export default function App() {
     const newWaitlist = [...waitlist, id];
     setWaitlist(newWaitlist);
 
+    // Automatically lock players when they enter the waitlist
+    const newLocked = new Set(lockedPlayers);
+    newLocked.add(id);
+    setLockedPlayers(newLocked);
+
     syncAllPlayersToFirebase(updatedPlayers);
     syncStateToFirebase({
       waitlist: newWaitlist,
-      nextQueueNumber: newNextQueue
+      nextQueueNumber: newNextQueue,
+      lockedPlayers: Array.from(newLocked)
     });
   };
 
@@ -429,9 +435,6 @@ export default function App() {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= newWaitlist.length) return;
     
-    // Check if either player is locked
-    if (lockedPlayers.has(newWaitlist[index]) || lockedPlayers.has(newWaitlist[targetIndex])) return;
-
     [newWaitlist[index], newWaitlist[targetIndex]] = [newWaitlist[targetIndex], newWaitlist[index]];
     updateWaitlistAndSyncNumbers(newWaitlist);
   };
@@ -492,14 +495,18 @@ export default function App() {
     if (players.length === 0) return { teamA: [], teamB: [] };
 
     const half = Math.ceil(players.length / 2);
-    const women = players.filter(p => p.gender === 'M').sort((a, b) => b.rating - a.rating);
-    const men = players.filter(p => p.gender === 'H').sort((a, b) => b.rating - a.rating);
+    
+    // Shuffle players first to ensure different results on each mix
+    const shuffled = [...players].sort(() => Math.random() - 0.5);
+    
+    const women = shuffled.filter(p => p.gender === 'M');
+    const men = shuffled.filter(p => p.gender === 'H');
 
     const tA: Player[] = [];
     const tB: Player[] = [];
 
     // Distribute women first to ensure gender balance
-    women.forEach((p, i) => {
+    women.forEach((p) => {
       if (tA.length < half && (tB.length === half || tA.length <= tB.length)) {
         tA.push(p);
       } else if (tB.length < half) {
@@ -578,46 +585,36 @@ export default function App() {
 
   const handleWin = (winner: 'A' | 'B') => {
     saveHistory();
-    const losingTeam = winner === 'A' ? teamB : teamA;
+    const losingTeam = winner === 'A' ? [...teamB] : [...teamA];
+    const winningTeam = winner === 'A' ? [...teamA] : [...teamB];
     
-    // Losers go to waitlist (unless locked)
-    const losersToWaitlist = losingTeam
-      .filter(p => !lockedPlayers.has(p.id))
-      .map(p => p.id);
-    
-    const losersStaying = losingTeam.filter(p => lockedPlayers.has(p.id));
-    
+    // Update wins
     const newConsecutiveWins = (winner === 'A' ? consecutiveWinsA : consecutiveWinsB) + 1;
-    let finalWinsA = consecutiveWinsA;
-    let finalWinsB = consecutiveWinsB;
+    let finalWinsA = winner === 'A' ? newConsecutiveWins : 0;
+    let finalWinsB = winner === 'B' ? newConsecutiveWins : 0;
 
-    if (winner === 'A') {
-      finalWinsA = newConsecutiveWins;
-      finalWinsB = 0;
-    } else {
-      finalWinsB = newConsecutiveWins;
-      finalWinsA = 0;
-    }
+    // Logic for next team:
+    // 1. Take as many as possible from waitlist (up to 6)
+    // 2. If waitlist has < 6, take from the losing team to complete 6
+    const numFromWaitlist = Math.min(waitlist.length, 6);
+    const playersFromWaitlist = waitlist.slice(0, numFromWaitlist).map(id => allPlayers.find(p => p.id === id)!).filter(Boolean);
+    
+    const numNeededFromLosers = 6 - playersFromWaitlist.length;
+    const playersFromLosers = losingTeam.slice(0, numNeededFromLosers);
+    
+    const newChallengerTeam = [...playersFromWaitlist, ...playersFromLosers];
+    const remainingLosers = losingTeam.slice(numNeededFromLosers);
+    
+    let newTeamA = winner === 'A' ? winningTeam : newChallengerTeam;
+    let newTeamB = winner === 'B' ? winningTeam : newChallengerTeam;
+    
+    // New waitlist: remaining waitlist + remaining losers
+    const newWaitlist = [...waitlist.slice(numFromWaitlist), ...remainingLosers.map(p => p.id)];
+
     setConsecutiveWinsA(finalWinsA);
     setConsecutiveWinsB(finalWinsB);
-
-    // Prepare next game
-    const availableFromWaitlist = waitlist.slice(0, losersToWaitlist.length);
-    const newPlayers = availableFromWaitlist.map(id => allPlayers.find(p => p.id === id)!);
-
-    let newTeamA = [...teamA];
-    let newTeamB = [...teamB];
-
-    if (winner === 'A') {
-      newTeamB = [...losersStaying, ...newPlayers];
-    } else {
-      newTeamA = [...losersStaying, ...newPlayers];
-    }
-    
     setTeamA(newTeamA);
     setTeamB(newTeamB);
-    
-    const newWaitlist = waitlist.slice(availableFromWaitlist.length).concat(losersToWaitlist);
     setWaitlist(newWaitlist);
 
     syncStateToFirebase({
@@ -1030,10 +1027,36 @@ export default function App() {
               className="space-y-4"
             >
               <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 p-4">
-                <h3 className="font-bold text-slate-200 mb-4 flex items-center gap-2">
-                  <RotateCcw className="w-5 h-5 text-amber-500" />
-                  Próximos da Fila
-                </h3>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-bold text-slate-200 flex items-center gap-2">
+                    <RotateCcw className="w-5 h-5 text-amber-500" />
+                    Próximos da Fila
+                  </h3>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => {
+                        const next = new Set(lockedPlayers);
+                        waitlist.forEach(id => next.add(id));
+                        setLockedPlayers(next);
+                        syncStateToFirebase({ lockedPlayers: Array.from(next) });
+                      }}
+                      className="text-[10px] font-bold px-2 py-1 rounded bg-slate-800 text-amber-500 hover:bg-slate-700 transition-colors flex items-center gap-1"
+                    >
+                      <Lock className="w-3 h-3" /> BLOQUEAR TODOS
+                    </button>
+                    <button 
+                      onClick={() => {
+                        const next = new Set(lockedPlayers);
+                        waitlist.forEach(id => next.delete(id));
+                        setLockedPlayers(next);
+                        syncStateToFirebase({ lockedPlayers: Array.from(next) });
+                      }}
+                      className="text-[10px] font-bold px-2 py-1 rounded bg-slate-800 text-slate-400 hover:bg-slate-700 transition-colors flex items-center gap-1"
+                    >
+                      <Unlock className="w-3 h-3" /> DESBLOQUEAR
+                    </button>
+                  </div>
+                </div>
                 <Reorder.Group axis="y" values={waitlist} onReorder={updateWaitlistAndSyncNumbers} className="space-y-2">
                   {waitlist.length === 0 ? (
                     <p className="text-slate-600 text-center py-12 text-sm italic">Ninguém na espera</p>
