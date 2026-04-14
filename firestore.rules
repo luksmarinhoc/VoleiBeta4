@@ -1,0 +1,65 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: players
+    // Document ID: {playerId}
+    // Fields:
+    //   - id: string (required)
+    //   - name: string (required, size < 100)
+    //   - rating: number (required, 0-5)
+    //   - gender: string (required, 'H' or 'M')
+    //   - isGuest: boolean (optional)
+    //   - queueNumber: number (optional)
+    //
+    // Collection: state
+    // Document ID: current
+    // Fields:
+    //   - waitlist: list of strings (player IDs)
+    //   - teamA: list of player objects
+    //   - teamB: list of player objects
+    //   - consecutiveWinsA: number
+    //   - consecutiveWinsB: number
+    //   - nextQueueNumber: number
+    //   - lockedPlayers: list of strings (player IDs)
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isValidPlayer(data) {
+      return data.keys().hasAll(['id', 'name', 'rating', 'gender']) &&
+             data.id is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.rating is number && data.rating >= 0 && data.rating <= 5 &&
+             data.gender in ['H', 'M'];
+    }
+
+    function isValidState(data) {
+      return data.waitlist is list &&
+             data.teamA is list &&
+             data.teamB is list &&
+             data.consecutiveWinsA is number &&
+             data.consecutiveWinsB is number &&
+             data.nextQueueNumber is number &&
+             data.lockedPlayers is list;
+    }
+
+    // Rules
+    match /players/{playerId} {
+      allow read: if true; // Publicly readable for the app to work
+      allow write: if isAuthenticated(); // Only logged in users can modify players
+    }
+
+    match /state/current {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+  }
+}

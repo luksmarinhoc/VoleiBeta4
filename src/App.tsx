@@ -1,6 +1,17 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Player, Gender, HistoryEntry } from './types';
 import { INITIAL_PLAYERS } from './constants';
+import { db, auth } from './firebase';
+import { 
+  doc, 
+  setDoc, 
+  onSnapshot, 
+  collection, 
+  getDocs, 
+  writeBatch,
+  getDocFromServer
+} from 'firebase/firestore';
+import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { 
   Users, 
   UserPlus, 
@@ -25,60 +36,95 @@ import {
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 
 export default function App() {
-  const [allPlayers, setAllPlayers] = useState<Player[]>(() => {
-    const saved = localStorage.getItem('volei_allPlayers');
-    return saved ? JSON.parse(saved) : INITIAL_PLAYERS;
-  });
-  const [waitlist, setWaitlist] = useState<string[]>(() => {
-    const saved = localStorage.getItem('volei_waitlist');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [teamA, setTeamA] = useState<Player[]>(() => {
-    const saved = localStorage.getItem('volei_teamA');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [teamB, setTeamB] = useState<Player[]>(() => {
-    const saved = localStorage.getItem('volei_teamB');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [consecutiveWinsA, setConsecutiveWinsA] = useState(() => {
-    const saved = localStorage.getItem('volei_winsA');
-    return saved ? parseInt(saved) : 0;
-  });
-  const [consecutiveWinsB, setConsecutiveWinsB] = useState(() => {
-    const saved = localStorage.getItem('volei_winsB');
-    return saved ? parseInt(saved) : 0;
-  });
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [allPlayers, setAllPlayers] = useState<Player[]>(INITIAL_PLAYERS);
+  const [waitlist, setWaitlist] = useState<string[]>([]);
+  const [teamA, setTeamA] = useState<Player[]>([]);
+  const [teamB, setTeamB] = useState<Player[]>([]);
+  const [consecutiveWinsA, setConsecutiveWinsA] = useState(0);
+  const [consecutiveWinsB, setConsecutiveWinsB] = useState(0);
   const [showRatings, setShowRatings] = useState(true);
-  const [lockedPlayers, setLockedPlayers] = useState<Set<string>>(() => {
-    const saved = localStorage.getItem('volei_locked');
-    return saved ? new Set(JSON.parse(saved)) : new Set();
-  });
-  const [nextQueueNumber, setNextQueueNumber] = useState(() => {
-    const saved = localStorage.getItem('volei_nextQueueNumber');
-    return saved ? parseInt(saved) : 1;
-  });
+  const [lockedPlayers, setLockedPlayers] = useState<Set<string>>(new Set());
+  const [nextQueueNumber, setNextQueueNumber] = useState(1);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
 
-  // Persistence
-  React.useEffect(() => {
-    localStorage.setItem('volei_allPlayers', JSON.stringify(allPlayers));
-    localStorage.setItem('volei_waitlist', JSON.stringify(waitlist));
-    localStorage.setItem('volei_teamA', JSON.stringify(teamA));
-    localStorage.setItem('volei_teamB', JSON.stringify(teamB));
-    localStorage.setItem('volei_winsA', consecutiveWinsA.toString());
-    localStorage.setItem('volei_winsB', consecutiveWinsB.toString());
-    localStorage.setItem('volei_locked', JSON.stringify(Array.from(lockedPlayers)));
-    localStorage.setItem('volei_nextQueueNumber', nextQueueNumber.toString());
-  }, [allPlayers, waitlist, teamA, teamB, consecutiveWinsA, consecutiveWinsB, lockedPlayers, nextQueueNumber]);
+  // Firebase Auth Setup
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        signInAnonymously(auth).catch(console.error);
+      } else {
+        setIsAuthReady(true);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
-  // Safety check: if no players have a queue number, nextQueueNumber should be 1
-  React.useEffect(() => {
-    const hasQueueNumbers = allPlayers.some(p => p.queueNumber !== undefined);
-    if (!hasQueueNumbers && nextQueueNumber !== 1 && waitlist.length === 0 && teamA.length === 0 && teamB.length === 0) {
-      setNextQueueNumber(1);
+  // Sync Players from Firestore
+  useEffect(() => {
+    if (!isAuthReady) return;
+    const unsubscribe = onSnapshot(collection(db, 'players'), (snapshot) => {
+      const players: Player[] = [];
+      snapshot.forEach((doc) => {
+        players.push(doc.data() as Player);
+      });
+      if (players.length > 0) {
+        setAllPlayers(players);
+      }
+    });
+    return () => unsubscribe();
+  }, [isAuthReady]);
+
+  // Sync State from Firestore
+  useEffect(() => {
+    if (!isAuthReady) return;
+    const unsubscribe = onSnapshot(doc(db, 'state', 'current'), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        setWaitlist(data.waitlist || []);
+        setTeamA(data.teamA || []);
+        setTeamB(data.teamB || []);
+        setConsecutiveWinsA(data.consecutiveWinsA || 0);
+        setConsecutiveWinsB(data.consecutiveWinsB || 0);
+        setNextQueueNumber(data.nextQueueNumber || 1);
+        setLockedPlayers(new Set(data.lockedPlayers || []));
+      }
+    });
+    return () => unsubscribe();
+  }, [isAuthReady]);
+
+  // Push State to Firestore
+  const syncStateToFirebase = useCallback(async (updates: any) => {
+    if (!isAuthReady) return;
+    try {
+      await setDoc(doc(db, 'state', 'current'), {
+        waitlist,
+        teamA,
+        teamB,
+        consecutiveWinsA,
+        consecutiveWinsB,
+        nextQueueNumber,
+        lockedPlayers: Array.from(lockedPlayers),
+        ...updates
+      }, { merge: true });
+    } catch (e) {
+      console.error("Error syncing state:", e);
     }
-  }, [allPlayers, nextQueueNumber, waitlist.length, teamA.length, teamB.length]);
+  }, [isAuthReady, waitlist, teamA, teamB, consecutiveWinsA, consecutiveWinsB, nextQueueNumber, lockedPlayers]);
+
+  const syncPlayerToFirebase = async (player: Player) => {
+    if (!isAuthReady) return;
+    await setDoc(doc(db, 'players', player.id), player);
+  };
+
+  const syncAllPlayersToFirebase = async (players: Player[]) => {
+    if (!isAuthReady) return;
+    const batch = writeBatch(db);
+    players.forEach(p => {
+      batch.set(doc(db, 'players', p.id), p);
+    });
+    await batch.commit();
+  };
 
   // UI State
   const [newPlayerName, setNewPlayerName] = useState('');
@@ -111,14 +157,27 @@ export default function App() {
   const resetSession = () => {
     if (window.confirm('Deseja resetar a partida? Isso removerá todos os jogadores da quadra e da espera, resetando a fila, mas MANTENDO as notas e nomes.')) {
       saveHistory();
+      const updates = {
+        teamA: [],
+        teamB: [],
+        waitlist: [],
+        consecutiveWinsA: 0,
+        consecutiveWinsB: 0,
+        nextQueueNumber: 1,
+        lockedPlayers: []
+      };
       setTeamA([]);
       setTeamB([]);
       setWaitlist([]);
       setConsecutiveWinsA(0);
       setConsecutiveWinsB(0);
       setNextQueueNumber(1);
-      setAllPlayers(prev => prev.map(p => ({ ...p, queueNumber: undefined })));
+      const updatedPlayers = allPlayers.map(p => ({ ...p, queueNumber: undefined }));
+      setAllPlayers(updatedPlayers);
       setLockedPlayers(new Set());
+      
+      syncStateToFirebase(updates);
+      syncAllPlayersToFirebase(updatedPlayers);
     }
   };
 
@@ -133,6 +192,16 @@ export default function App() {
     setNextQueueNumber(last.nextQueueNumber);
     setAllPlayers(last.allPlayers);
     setHistory(prev => prev.slice(1));
+
+    syncStateToFirebase({
+      waitlist: last.waitlist,
+      teamA: last.teamA,
+      teamB: last.teamB,
+      consecutiveWinsA: last.consecutiveWinsA,
+      consecutiveWinsB: last.consecutiveWinsB,
+      nextQueueNumber: last.nextQueueNumber
+    });
+    syncAllPlayersToFirebase(last.allPlayers);
   };
 
   const addPlayerToGame = (id: string) => {
@@ -140,12 +209,21 @@ export default function App() {
     saveHistory();
     
     // Assign queue number
-    setAllPlayers(prev => prev.map(p => 
+    const updatedPlayers = allPlayers.map(p => 
       p.id === id ? { ...p, queueNumber: nextQueueNumber } : p
-    ));
-    setNextQueueNumber(prev => prev + 1);
+    );
+    setAllPlayers(updatedPlayers);
+    const newNextQueue = nextQueueNumber + 1;
+    setNextQueueNumber(newNextQueue);
     
-    setWaitlist(prev => [...prev, id]);
+    const newWaitlist = [...waitlist, id];
+    setWaitlist(newWaitlist);
+
+    syncAllPlayersToFirebase(updatedPlayers);
+    syncStateToFirebase({
+      waitlist: newWaitlist,
+      nextQueueNumber: newNextQueue
+    });
   };
 
   const removePlayerFromGame = (id: string) => {
@@ -156,34 +234,42 @@ export default function App() {
     else if (teamB.some(p => p.id === id)) fromTeam = 'B';
 
     // Clear queue number
-    setAllPlayers(prev => prev.map(p => 
+    const updatedPlayers = allPlayers.map(p => 
       p.id === id ? { ...p, queueNumber: undefined } : p
-    ));
+    );
+    setAllPlayers(updatedPlayers);
     
-    setLockedPlayers(prev => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
+    const newLocked = new Set(lockedPlayers);
+    newLocked.delete(id);
+    setLockedPlayers(newLocked);
 
-    setWaitlist(prev => {
-      const filteredWaitlist = prev.filter(pid => pid !== id);
-      
-      if (fromTeam && filteredWaitlist.length > 0) {
-        const nextId = filteredWaitlist[0];
-        const nextPlayer = allPlayers.find(p => p.id === nextId);
-        if (nextPlayer) {
-          if (fromTeam === 'A') setTeamA(t => [...t.filter(p => p.id !== id), nextPlayer]);
-          else setTeamB(t => [...t.filter(p => p.id !== id), nextPlayer]);
-          return filteredWaitlist.slice(1);
-        }
+    let newTeamA = [...teamA];
+    let newTeamB = [...teamB];
+    let newWaitlist = waitlist.filter(pid => pid !== id);
+
+    if (fromTeam && newWaitlist.length > 0) {
+      const nextId = newWaitlist[0];
+      const nextPlayer = updatedPlayers.find(p => p.id === nextId);
+      if (nextPlayer) {
+        if (fromTeam === 'A') newTeamA = [...newTeamA.filter(p => p.id !== id), nextPlayer];
+        else newTeamB = [...newTeamB.filter(p => p.id !== id), nextPlayer];
+        newWaitlist = newWaitlist.slice(1);
       }
+    } else {
+      if (fromTeam === 'A') newTeamA = newTeamA.filter(p => p.id !== id);
+      if (fromTeam === 'B') newTeamB = newTeamB.filter(p => p.id !== id);
+    }
 
-      // Default removal if no one in waitlist or not in a team
-      if (fromTeam === 'A') setTeamA(t => t.filter(p => p.id !== id));
-      if (fromTeam === 'B') setTeamB(t => t.filter(p => p.id !== id));
-      
-      return filteredWaitlist;
+    setWaitlist(newWaitlist);
+    setTeamA(newTeamA);
+    setTeamB(newTeamB);
+
+    syncAllPlayersToFirebase(updatedPlayers);
+    syncStateToFirebase({
+      waitlist: newWaitlist,
+      teamA: newTeamA,
+      teamB: newTeamB,
+      lockedPlayers: Array.from(newLocked)
     });
   };
 
@@ -200,6 +286,7 @@ export default function App() {
     };
     setAllPlayers(prev => [...prev, newPlayer]);
     setNewPlayerName('');
+    syncPlayerToFirebase(newPlayer);
   };
 
   const startEditing = (p: Player) => {
@@ -217,51 +304,59 @@ export default function App() {
     const ratingValue = parseFloat(editRating);
     const validatedRating = isNaN(ratingValue) ? 3.0 : Math.min(5, Math.max(0, ratingValue));
 
-    setAllPlayers(prev => prev.map(p => 
-      p.id === id 
-        ? { ...p, name: editName, rating: validatedRating, gender: editGender }
-        : p
-    ));
-    // Update teams if player is on court
-    setTeamA(prev => prev.map(p => 
-      p.id === id 
-        ? { ...p, name: editName, rating: validatedRating, gender: editGender }
-        : p
-    ));
-    setTeamB(prev => prev.map(p => 
-      p.id === id 
-        ? { ...p, name: editName, rating: validatedRating, gender: editGender }
-        : p
-    ));
+    const updatedPlayer = { ...allPlayers.find(p => p.id === id)!, name: editName, rating: validatedRating, gender: editGender };
+    
+    setAllPlayers(prev => prev.map(p => p.id === id ? updatedPlayer : p));
+    setTeamA(prev => prev.map(p => p.id === id ? updatedPlayer : p));
+    setTeamB(prev => prev.map(p => p.id === id ? updatedPlayer : p));
     setEditingPlayerId(null);
+
+    syncPlayerToFirebase(updatedPlayer);
+    syncStateToFirebase({}); // Trigger state sync to update teams in Firestore
   };
 
   const updatePlayerRating = (id: string, newRating: number) => {
-    setAllPlayers(prev => prev.map(p => p.id === id ? { ...p, rating: newRating } : p));
-    setTeamA(prev => prev.map(p => p.id === id ? { ...p, rating: newRating } : p));
-    setTeamB(prev => prev.map(p => p.id === id ? { ...p, rating: newRating } : p));
+    const updatedPlayer = { ...allPlayers.find(p => p.id === id)!, rating: newRating };
+    setAllPlayers(prev => prev.map(p => p.id === id ? updatedPlayer : p));
+    setTeamA(prev => prev.map(p => p.id === id ? updatedPlayer : p));
+    setTeamB(prev => prev.map(p => p.id === id ? updatedPlayer : p));
+    
+    syncPlayerToFirebase(updatedPlayer);
+    syncStateToFirebase({});
   };
 
-  const deletePlayer = (id: string) => {
+  const deletePlayer = async (id: string) => {
     if (!window.confirm('Tem certeza que deseja excluir este jogador permanentemente?')) return;
-    setAllPlayers(prev => prev.filter(p => p.id !== id));
-    setWaitlist(prev => prev.filter(pid => pid !== id));
-    setTeamA(prev => prev.filter(p => p.id !== id));
-    setTeamB(prev => prev.filter(p => p.id !== id));
-    setLockedPlayers(prev => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
+    const updatedPlayers = allPlayers.filter(p => p.id !== id);
+    const newWaitlist = waitlist.filter(pid => pid !== id);
+    const newTeamA = teamA.filter(p => p.id !== id);
+    const newTeamB = teamB.filter(p => p.id !== id);
+    const newLocked = new Set(lockedPlayers);
+    newLocked.delete(id);
+
+    setAllPlayers(updatedPlayers);
+    setWaitlist(newWaitlist);
+    setTeamA(newTeamA);
+    setTeamB(newTeamB);
+    setLockedPlayers(newLocked);
+
+    // Delete from Firestore
+    const { deleteDoc } = await import('firebase/firestore');
+    await deleteDoc(doc(db, 'players', id));
+    syncStateToFirebase({
+      waitlist: newWaitlist,
+      teamA: newTeamA,
+      teamB: newTeamB,
+      lockedPlayers: Array.from(newLocked)
     });
   };
 
   const toggleLock = (id: string) => {
-    setLockedPlayers(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    const next = new Set(lockedPlayers);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setLockedPlayers(next);
+    syncStateToFirebase({ lockedPlayers: Array.from(next) });
   };
 
   const updateWaitlistAndSyncNumbers = (newWaitlist: string[]) => {
@@ -283,6 +378,9 @@ export default function App() {
     
     setAllPlayers(updatedAllPlayers);
     setWaitlist(newWaitlist);
+
+    syncAllPlayersToFirebase(updatedAllPlayers);
+    syncStateToFirebase({ waitlist: newWaitlist });
   };
 
   const moveInWaitlist = (index: number, direction: 'up' | 'down') => {
@@ -308,16 +406,26 @@ export default function App() {
     if (lockedPlayers.has(currentTeam[index].id) || lockedPlayers.has(currentTeam[targetIndex].id)) return;
 
     [currentTeam[index], currentTeam[targetIndex]] = [currentTeam[targetIndex], currentTeam[index]];
-    if (team === 'A') setTeamA(currentTeam);
-    else setTeamB(currentTeam);
+    if (team === 'A') {
+      setTeamA(currentTeam);
+      syncStateToFirebase({ teamA: currentTeam });
+    } else {
+      setTeamB(currentTeam);
+      syncStateToFirebase({ teamB: currentTeam });
+    }
   };
 
   const onReorderTeam = (team: 'A' | 'B', newOrder: Player[]) => {
     // Check if any locked player changed their relative position
     // This is complex with Reorder.Group, so we'll just allow it for now
     // but prevent dragging locked players via dragListener
-    if (team === 'A') setTeamA(newOrder);
-    else setTeamB(newOrder);
+    if (team === 'A') {
+      setTeamA(newOrder);
+      syncStateToFirebase({ teamA: newOrder });
+    } else {
+      setTeamB(newOrder);
+      syncStateToFirebase({ teamB: newOrder });
+    }
   };
 
   const switchTeam = (id: string) => {
@@ -326,11 +434,17 @@ export default function App() {
     const playerB = teamB.find(p => p.id === id);
 
     if (playerA) {
-      setTeamA(prev => prev.filter(p => p.id !== id));
-      setTeamB(prev => [...prev, playerA]);
+      const newA = teamA.filter(p => p.id !== id);
+      const newB = [...teamB, playerA];
+      setTeamA(newA);
+      setTeamB(newB);
+      syncStateToFirebase({ teamA: newA, teamB: newB });
     } else if (playerB) {
-      setTeamB(prev => prev.filter(p => p.id !== id));
-      setTeamA(prev => [...prev, playerB]);
+      const newB = teamB.filter(p => p.id !== id);
+      const newA = [...teamA, playerB];
+      setTeamB(newB);
+      setTeamA(newA);
+      syncStateToFirebase({ teamA: newA, teamB: newB });
     }
   };
 
@@ -382,6 +496,12 @@ export default function App() {
     setTeamB(newB);
     setConsecutiveWinsA(0);
     setConsecutiveWinsB(0);
+    syncStateToFirebase({
+      teamA: newA,
+      teamB: newB,
+      consecutiveWinsA: 0,
+      consecutiveWinsB: 0
+    });
   };
 
   const fillCourt = useCallback(() => {
@@ -401,10 +521,20 @@ export default function App() {
     const playersForA = toAdd.slice(0, neededA);
     const playersForB = toAdd.slice(neededA);
 
-    setTeamA(prev => [...prev, ...playersForA]);
-    setTeamB(prev => [...prev, ...playersForB]);
-    setWaitlist(prev => prev.slice(toAdd.length));
-  }, [teamA, teamB, waitlist, allPlayers, saveHistory]);
+    const newA = [...teamA, ...playersForA];
+    const newB = [...teamB, ...playersForB];
+    const newWaitlist = waitlist.slice(toAdd.length);
+
+    setTeamA(newA);
+    setTeamB(newB);
+    setWaitlist(newWaitlist);
+
+    syncStateToFirebase({
+      teamA: newA,
+      teamB: newB,
+      waitlist: newWaitlist
+    });
+  }, [teamA, teamB, waitlist, allPlayers, saveHistory, syncStateToFirebase]);
 
   const handleWin = (winner: 'A' | 'B') => {
     saveHistory();
@@ -418,27 +548,45 @@ export default function App() {
     const losersStaying = losingTeam.filter(p => lockedPlayers.has(p.id));
     
     const newConsecutiveWins = (winner === 'A' ? consecutiveWinsA : consecutiveWinsB) + 1;
+    let finalWinsA = consecutiveWinsA;
+    let finalWinsB = consecutiveWinsB;
+
     if (winner === 'A') {
-      setConsecutiveWinsA(newConsecutiveWins);
-      setConsecutiveWinsB(0);
+      finalWinsA = newConsecutiveWins;
+      finalWinsB = 0;
     } else {
-      setConsecutiveWinsB(newConsecutiveWins);
-      setConsecutiveWinsA(0);
+      finalWinsB = newConsecutiveWins;
+      finalWinsA = 0;
     }
+    setConsecutiveWinsA(finalWinsA);
+    setConsecutiveWinsB(finalWinsB);
 
     // Prepare next game
-    // Take players strictly by arrival order from waitlist
     const availableFromWaitlist = waitlist.slice(0, losersToWaitlist.length);
     const newPlayers = availableFromWaitlist.map(id => allPlayers.find(p => p.id === id)!);
 
+    let newTeamA = [...teamA];
+    let newTeamB = [...teamB];
+
     if (winner === 'A') {
-      setTeamB([...losersStaying, ...newPlayers]);
+      newTeamB = [...losersStaying, ...newPlayers];
     } else {
-      setTeamA([...losersStaying, ...newPlayers]);
+      newTeamA = [...losersStaying, ...newPlayers];
     }
     
-    // Update waitlist: remove those who entered, add those who left
-    setWaitlist(prev => prev.slice(availableFromWaitlist.length).concat(losersToWaitlist));
+    setTeamA(newTeamA);
+    setTeamB(newTeamB);
+    
+    const newWaitlist = waitlist.slice(availableFromWaitlist.length).concat(losersToWaitlist);
+    setWaitlist(newWaitlist);
+
+    syncStateToFirebase({
+      teamA: newTeamA,
+      teamB: newTeamB,
+      waitlist: newWaitlist,
+      consecutiveWinsA: finalWinsA,
+      consecutiveWinsB: finalWinsB
+    });
   };
 
   const teamAScore = useMemo(() => teamA.reduce((acc, p) => acc + p.rating, 0), [teamA]);

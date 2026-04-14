@@ -1,0 +1,42 @@
+{
+  "entities": {
+    "Player": {
+      "title": "Player",
+      "description": "A volleyball player",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "rating": { "type": "number" },
+        "gender": { "type": "string", "enum": ["H", "M"] },
+        "isGuest": { "type": "boolean" },
+        "queueNumber": { "type": "number" }
+      },
+      "required": ["id", "name", "rating", "gender"]
+    },
+    "GameState": {
+      "title": "Game State",
+      "description": "The global state of the volleyball game",
+      "type": "object",
+      "properties": {
+        "waitlist": { "type": "array", "items": { "type": "string" } },
+        "teamA": { "type": "array", "items": { "$ref": "Player" } },
+        "teamB": { "type": "array", "items": { "$ref": "Player" } },
+        "consecutiveWinsA": { "type": "number" },
+        "consecutiveWinsB": { "type": "number" },
+        "nextQueueNumber": { "type": "number" },
+        "lockedPlayers": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "firestore": {
+    "/players/{playerId}": {
+      "schema": "Player",
+      "description": "The master list of all players"
+    },
+    "/state/current": {
+      "schema": "GameState",
+      "description": "The current live state of the game"
+    }
+  }
+}
