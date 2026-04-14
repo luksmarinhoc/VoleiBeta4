@@ -83,7 +83,7 @@ export default function App() {
   // UI State
   const [newPlayerName, setNewPlayerName] = useState('');
   const [newPlayerGender, setNewPlayerGender] = useState<Gender>('H');
-  const [newPlayerRating, setNewPlayerRating] = useState('2.5');
+  const [newPlayerRating, setNewPlayerRating] = useState('3.0');
   const [activeTab, setActiveTab] = useState<'court' | 'waitlist' | 'inactive'>('court');
 
   // Editing State
@@ -190,11 +190,12 @@ export default function App() {
   const registerPlayer = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPlayerName.trim()) return;
+    const ratingValue = parseFloat(newPlayerRating);
     const newPlayer: Player = {
       id: Math.random().toString(36).substr(2, 9),
       name: newPlayerName,
       gender: newPlayerGender,
-      rating: parseFloat(newPlayerRating) || 2.5,
+      rating: isNaN(ratingValue) ? 3.0 : Math.min(5, Math.max(0, ratingValue)),
       isGuest: true
     };
     setAllPlayers(prev => [...prev, newPlayer]);
@@ -213,20 +214,23 @@ export default function App() {
   };
 
   const savePlayerEdit = (id: string) => {
+    const ratingValue = parseFloat(editRating);
+    const validatedRating = isNaN(ratingValue) ? 3.0 : Math.min(5, Math.max(0, ratingValue));
+
     setAllPlayers(prev => prev.map(p => 
       p.id === id 
-        ? { ...p, name: editName, rating: parseFloat(editRating) || 2.5, gender: editGender }
+        ? { ...p, name: editName, rating: validatedRating, gender: editGender }
         : p
     ));
     // Update teams if player is on court
     setTeamA(prev => prev.map(p => 
       p.id === id 
-        ? { ...p, name: editName, rating: parseFloat(editRating) || 2.5, gender: editGender }
+        ? { ...p, name: editName, rating: validatedRating, gender: editGender }
         : p
     ));
     setTeamB(prev => prev.map(p => 
       p.id === id 
-        ? { ...p, name: editName, rating: parseFloat(editRating) || 2.5, gender: editGender }
+        ? { ...p, name: editName, rating: validatedRating, gender: editGender }
         : p
     ));
     setEditingPlayerId(null);
@@ -621,8 +625,10 @@ export default function App() {
                                     <input 
                                       type="number" 
                                       step="0.1"
+                                      min="0"
+                                      max="5"
                                       value={p.rating}
-                                      onChange={(e) => updatePlayerRating(p.id, parseFloat(e.target.value) || 0)}
+                                      onChange={(e) => updatePlayerRating(p.id, Math.min(5, Math.max(0, parseFloat(e.target.value) || 0)))}
                                       className="w-10 bg-transparent border-none text-[10px] text-amber-500 font-bold focus:ring-0 p-0"
                                     />
                                   </div>
@@ -730,8 +736,10 @@ export default function App() {
                                     <input 
                                       type="number" 
                                       step="0.1"
+                                      min="0"
+                                      max="5"
                                       value={p.rating}
-                                      onChange={(e) => updatePlayerRating(p.id, parseFloat(e.target.value) || 0)}
+                                      onChange={(e) => updatePlayerRating(p.id, Math.min(5, Math.max(0, parseFloat(e.target.value) || 0)))}
                                       className="w-10 bg-transparent border-none text-[10px] text-amber-500 font-bold focus:ring-0 p-0"
                                     />
                                   </div>
@@ -844,8 +852,10 @@ export default function App() {
                                   <input 
                                     type="number" 
                                     step="0.1"
+                                    min="0"
+                                    max="5"
                                     value={p.rating}
-                                    onChange={(e) => updatePlayerRating(p.id, parseFloat(e.target.value) || 0)}
+                                    onChange={(e) => updatePlayerRating(p.id, Math.min(5, Math.max(0, parseFloat(e.target.value) || 0)))}
                                     className="w-10 bg-transparent border-none text-[10px] text-amber-500 font-bold focus:ring-0 p-0"
                                   />
                                 </div>
@@ -929,7 +939,9 @@ export default function App() {
                   <input 
                     type="number" 
                     step="0.01"
-                    placeholder="Nota (Padrão 2.5)" 
+                    min="0"
+                    max="5"
+                    placeholder="Nota (0 a 5)" 
                     value={newPlayerRating}
                     onChange={e => setNewPlayerRating(e.target.value)}
                     className="p-3 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-200 focus:ring-2 focus:ring-amber-500 outline-none placeholder:text-slate-600"
@@ -1003,6 +1015,8 @@ export default function App() {
                               <input 
                                 type="number" 
                                 step="0.01"
+                                min="0"
+                                max="5"
                                 value={editRating}
                                 onChange={e => setEditRating(e.target.value)}
                                 className="p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
@@ -1044,8 +1058,10 @@ export default function App() {
                                       <input 
                                         type="number" 
                                         step="0.1"
+                                        min="0"
+                                        max="5"
                                         value={p.rating}
-                                        onChange={(e) => updatePlayerRating(p.id, parseFloat(e.target.value) || 0)}
+                                        onChange={(e) => updatePlayerRating(p.id, Math.min(5, Math.max(0, parseFloat(e.target.value) || 0)))}
                                         className="w-12 bg-slate-800 border border-slate-700 rounded px-1 text-[10px] text-amber-500 font-bold focus:ring-1 focus:ring-amber-500 outline-none"
                                       />
                                     </div>
