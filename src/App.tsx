@@ -1300,7 +1300,7 @@ export default function App() {
                               <div>
                                 <div className="flex items-center gap-2">
                                   <p className="text-sm font-semibold text-slate-200">
-                                    {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
+                                    {isInGame && p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
                                     {p.name}
                                   </p>
                                   {isInGame && <span className="text-[8px] bg-amber-500/20 text-amber-500 px-1 rounded">EM JOGO</span>}
