@@ -737,7 +737,7 @@ export default function App() {
             onClick={() => setActiveTab('inactive')}
             className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'inactive' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:bg-slate-800'}`}
           >
-            Jogadores ({allPlayers.length})
+            FORA DE JOGO ({allPlayers.length})
           </button>
         </div>
 
@@ -1210,7 +1210,7 @@ export default function App() {
               <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 p-4">
                 <div className="flex justify-between items-center mb-4">
                   <div>
-                    <h3 className="font-bold text-slate-200">Base de Dados de Jogadores</h3>
+                    <h3 className="font-bold text-slate-200">Jogadores FORA DE JOGO</h3>
                     <button 
                       onClick={() => setIsBulkEditingRatings(!isBulkEditingRatings)}
                       className={`text-[10px] font-bold px-2 py-1 rounded mt-1 transition-colors ${isBulkEditingRatings ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
@@ -1375,7 +1375,7 @@ export default function App() {
           </div>
           <div className="flex flex-col items-center">
             <span className="text-amber-500 text-sm">{inactivePlayers.length}</span>
-            <span>Inativos</span>
+            <span>FORA DE JOGO</span>
           </div>
         </div>
       </footer>
