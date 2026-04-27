@@ -605,24 +605,42 @@ export default function App() {
     const newChallengerTeam = [...playersFromWaitlist, ...playersFromLosers];
     const remainingLosers = losingTeam.slice(numNeededFromLosers);
     
+    // UPDATE QUEUE NUMBERS for players going to waitlist
+    let currentNext = nextQueueNumber;
+    const losersWithNewNumbers = remainingLosers.map(p => {
+      const updated = { ...p, queueNumber: currentNext };
+      currentNext++;
+      return updated;
+    });
+
+    // Update allPlayers with new queue numbers
+    const updatedAllPlayers = allPlayers.map(p => {
+      const updatedLoser = losersWithNewNumbers.find(l => l.id === p.id);
+      return updatedLoser || p;
+    });
+
     let newTeamA = winner === 'A' ? winningTeam : newChallengerTeam;
     let newTeamB = winner === 'B' ? winningTeam : newChallengerTeam;
     
-    // New waitlist: remaining waitlist + remaining losers
-    const newWaitlist = [...waitlist.slice(numFromWaitlist), ...remainingLosers.map(p => p.id)];
+    // New waitlist: remaining waitlist + remaining losers (with updated IDs)
+    const newWaitlist = [...waitlist.slice(numFromWaitlist), ...losersWithNewNumbers.map(p => p.id)];
 
     setConsecutiveWinsA(finalWinsA);
     setConsecutiveWinsB(finalWinsB);
     setTeamA(newTeamA);
     setTeamB(newTeamB);
     setWaitlist(newWaitlist);
+    setAllPlayers(updatedAllPlayers);
+    setNextQueueNumber(currentNext);
 
+    syncAllPlayersToFirebase(updatedAllPlayers);
     syncStateToFirebase({
       teamA: newTeamA,
       teamB: newTeamB,
       waitlist: newWaitlist,
       consecutiveWinsA: finalWinsA,
-      consecutiveWinsB: finalWinsB
+      consecutiveWinsB: finalWinsB,
+      nextQueueNumber: currentNext
     });
   };
 
