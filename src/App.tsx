@@ -55,6 +55,12 @@ export default function App() {
   const [nextQueueNumber, setNextQueueNumber] = useState(1);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
 
+  const womenCountA = useMemo(() => teamA.filter(p => p.gender === 'M').length, [teamA]);
+  const womenCountB = useMemo(() => teamB.filter(p => p.gender === 'M').length, [teamB]);
+  const hasGenderImbalance = useMemo(() => {
+    return (teamA.length > 0 && teamB.length > 0) && (womenCountA !== womenCountB);
+  }, [teamA, teamB, womenCountA, womenCountB]);
+
   // Firebase Auth Setup
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -809,6 +815,24 @@ export default function App() {
                 </motion.div>
               )}
 
+              {hasGenderImbalance && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-rose-500/10 border border-rose-500/30 p-4 rounded-xl flex items-center gap-3 shadow-lg shadow-rose-500/5 text-rose-200"
+                >
+                  <div className="w-10 h-10 rounded-full bg-rose-500/20 flex items-center justify-center shrink-0">
+                    <ArrowLeftRight className="w-5 h-5 text-rose-400" />
+                  </div>
+                  <div>
+                    <p className="text-rose-200 font-bold text-sm">Alerta: Desequilíbrio de Gênero</p>
+                    <p className="text-rose-400/80 text-xs">
+                      O Time A tem <span className="font-bold text-rose-300">{womenCountA}</span> {womenCountA === 1 ? 'mulher' : 'mulheres'} e o Time B tem <span className="font-bold text-rose-300">{womenCountB}</span> {womenCountB === 1 ? 'mulher' : 'mulheres'}. Considere trocar jogadores para balancear as equipes.
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+
               {/* Teams Grid */}
               <div className="grid md:grid-cols-2 gap-6">
                 {/* Team A */}
@@ -816,6 +840,11 @@ export default function App() {
                   <div className="bg-amber-500 p-4 text-slate-950 flex justify-between items-center">
                     <div>
                       <h3 className="font-bold">Time A</h3>
+                      {teamA.length > 0 && (
+                        <p className="text-[10px] text-slate-900 font-bold opacity-80">
+                          {teamA.filter(p => p.gender === 'M').length} ♀ • {teamA.filter(p => p.gender === 'H').length} ♂
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs bg-amber-600/30 px-2 py-1 rounded-full">Vitórias: {consecutiveWinsA}</span>
@@ -903,6 +932,11 @@ export default function App() {
                   <div className="bg-white p-4 text-slate-950 flex justify-between items-center">
                     <div>
                       <h3 className="font-bold">Time B</h3>
+                      {teamB.length > 0 && (
+                        <p className="text-[10px] text-slate-500 font-bold opacity-80">
+                          {teamB.filter(p => p.gender === 'M').length} ♀ • {teamB.filter(p => p.gender === 'H').length} ♂
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs bg-slate-200 px-2 py-1 rounded-full">Vitórias: {consecutiveWinsB}</span>
