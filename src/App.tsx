@@ -51,7 +51,6 @@ export default function App() {
   const [teamB, setTeamB] = useState<Player[]>([]);
   const [consecutiveWinsA, setConsecutiveWinsA] = useState(0);
   const [consecutiveWinsB, setConsecutiveWinsB] = useState(0);
-  const [showRatings, setShowRatings] = useState(true);
   const [lockedPlayers, setLockedPlayers] = useState<Set<string>>(new Set());
   const [nextQueueNumber, setNextQueueNumber] = useState(1);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -169,14 +168,11 @@ export default function App() {
   // UI State
   const [newPlayerName, setNewPlayerName] = useState('');
   const [newPlayerGender, setNewPlayerGender] = useState<Gender>('H');
-  const [newPlayerRating, setNewPlayerRating] = useState('3.0');
   const [activeTab, setActiveTab] = useState<'court' | 'waitlist' | 'inactive'>('court');
 
   // Editing State
   const [editingPlayerId, setEditingPlayerId] = useState<string | null>(null);
-  const [isBulkEditingRatings, setIsBulkEditingRatings] = useState(false);
   const [editName, setEditName] = useState('');
-  const [editRating, setEditRating] = useState('');
   const [editGender, setEditGender] = useState<Gender>('H');
 
   const saveHistory = useCallback(() => {
@@ -195,7 +191,7 @@ export default function App() {
   }, [waitlist, teamA, teamB, consecutiveWinsA, consecutiveWinsB, nextQueueNumber, allPlayers]);
 
   const resetSession = () => {
-    if (window.confirm('Deseja resetar a partida? Isso removerá todos os jogadores da quadra e da espera, resetando a fila, mas MANTENDO as notas e nomes.')) {
+    if (window.confirm('Deseja resetar a partida? Isso removerá todos os jogadores da quadra e da espera, resetando a fila, mas MANTENDO os nomes.')) {
       saveHistory();
       const updates = {
         teamA: [],
@@ -322,12 +318,11 @@ export default function App() {
   const registerPlayer = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPlayerName.trim()) return;
-    const ratingValue = parseFloat(newPlayerRating);
     const newPlayer: Player = {
       id: Math.random().toString(36).substr(2, 9),
       name: newPlayerName,
       gender: newPlayerGender,
-      rating: isNaN(ratingValue) ? 3.0 : Math.min(5, Math.max(0, ratingValue)),
+      rating: 3.0,
       isGuest: true
     };
     setAllPlayers(prev => [...prev, newPlayer]);
@@ -338,7 +333,6 @@ export default function App() {
   const startEditing = (p: Player) => {
     setEditingPlayerId(p.id);
     setEditName(p.name);
-    setEditRating(p.rating.toString());
     setEditGender(p.gender);
   };
 
@@ -347,10 +341,8 @@ export default function App() {
   };
 
   const savePlayerEdit = (id: string) => {
-    const ratingValue = parseFloat(editRating);
-    const validatedRating = isNaN(ratingValue) ? 3.0 : Math.min(5, Math.max(0, ratingValue));
-
-    const updatedPlayer = { ...allPlayers.find(p => p.id === id)!, name: editName, rating: validatedRating, gender: editGender };
+    const existingPlayer = allPlayers.find(p => p.id === id)!;
+    const updatedPlayer = { ...existingPlayer, name: editName, gender: editGender };
     
     setAllPlayers(prev => prev.map(p => p.id === id ? updatedPlayer : p));
     setTeamA(prev => prev.map(p => p.id === id ? updatedPlayer : p));
@@ -359,16 +351,6 @@ export default function App() {
 
     syncPlayerToFirebase(updatedPlayer);
     syncStateToFirebase({}); // Trigger state sync to update teams in Firestore
-  };
-
-  const updatePlayerRating = (id: string, newRating: number) => {
-    const updatedPlayer = { ...allPlayers.find(p => p.id === id)!, rating: newRating };
-    setAllPlayers(prev => prev.map(p => p.id === id ? updatedPlayer : p));
-    setTeamA(prev => prev.map(p => p.id === id ? updatedPlayer : p));
-    setTeamB(prev => prev.map(p => p.id === id ? updatedPlayer : p));
-    
-    syncPlayerToFirebase(updatedPlayer);
-    syncStateToFirebase({});
   };
 
   const deletePlayer = async (id: string) => {
@@ -516,12 +498,9 @@ export default function App() {
       }
     });
 
-    // Distribute men to balance ratings
+    // Distribute men to balance team sizes
     men.forEach(p => {
-      const sumA = tA.reduce((acc, curr) => acc + curr.rating, 0);
-      const sumB = tB.reduce((acc, curr) => acc + curr.rating, 0);
-
-      if (tA.length < half && (tB.length === half || sumA <= sumB)) {
+      if (tA.length < half && (tB.length === half || tA.length <= tB.length)) {
         tA.push(p);
       } else {
         tB.push(p);
@@ -644,13 +623,6 @@ export default function App() {
     });
   };
 
-  const teamAScore = useMemo(() => teamA.reduce((acc, p) => acc + p.rating, 0), [teamA]);
-  const teamBScore = useMemo(() => teamB.reduce((acc, p) => acc + p.rating, 0), [teamB]);
-  const imbalance = useMemo(() => {
-    if (teamAScore === 0 || teamBScore === 0) return 0;
-    return Math.abs(teamAScore - teamBScore) / Math.max(teamAScore, teamBScore);
-  }, [teamAScore, teamBScore]);
-
   const inactivePlayers = allPlayers.filter(p => 
     !waitlist.includes(p.id) && 
     !teamA.some(tp => tp.id === p.id) && 
@@ -691,14 +663,6 @@ export default function App() {
                 <LogIn className="w-4 h-4" /> ENTRAR
               </button>
             )}
-            <div className="w-px h-6 bg-slate-800 mx-1" />
-            <button 
-              onClick={() => setShowRatings(!showRatings)}
-              className="p-2 hover:bg-slate-800 rounded-full transition-colors"
-              title={showRatings ? "Ocultar Notas" : "Mostrar Notas"}
-            >
-              {showRatings ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-            </button>
             <button 
               onClick={revertLastAction}
               disabled={history.length === 0}
@@ -771,7 +735,7 @@ export default function App() {
               </div>
 
               {/* Status Alerts */}
-              {(consecutiveWinsA >= 3 || consecutiveWinsB >= 3 || imbalance > 0.15) && (
+              {(consecutiveWinsA >= 3 || consecutiveWinsB >= 3) && (
                 <motion.div 
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -784,9 +748,7 @@ export default function App() {
                     <div>
                       <p className="text-amber-200 font-bold text-sm">Sugestão de Reequilíbrio</p>
                       <p className="text-amber-400/70 text-xs">
-                        {consecutiveWinsA >= 3 || consecutiveWinsB >= 3 
-                          ? `Sequência de vitórias: ${Math.max(consecutiveWinsA, consecutiveWinsB)} partidas` 
-                          : `Desequilíbrio técnico: ${(imbalance * 100).toFixed(1)}%`}
+                        Sequência de vitórias: {Math.max(consecutiveWinsA, consecutiveWinsB)} partidas
                       </p>
                     </div>
                   </div>
@@ -806,16 +768,6 @@ export default function App() {
                   <div className="bg-amber-500 p-4 text-slate-950 flex justify-between items-center">
                     <div>
                       <h3 className="font-bold">Time A</h3>
-                      {showRatings && (
-                        <div className="flex items-center gap-2">
-                          <p className="text-amber-900 text-xs font-medium">Soma: {teamAScore.toFixed(2)}</p>
-                          {imbalance > 0 && (
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${imbalance > 0.15 ? 'bg-rose-500/20 text-rose-900' : 'bg-amber-600/20 text-amber-900'}`}>
-                              Δ {(imbalance * 100).toFixed(0)}%
-                            </span>
-                          )}
-                        </div>
-                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs bg-amber-600/30 px-2 py-1 rounded-full">Vitórias: {consecutiveWinsA}</span>
@@ -847,20 +799,6 @@ export default function App() {
                                   {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
                                   {p.name}
                                 </p>
-                                {showRatings && (
-                                  <div className="flex items-center gap-1">
-                                    <span className="text-[10px] text-slate-500">Nota:</span>
-                                    <input 
-                                      type="number" 
-                                      step="0.1"
-                                      min="0"
-                                      max="5"
-                                      value={p.rating}
-                                      onChange={(e) => updatePlayerRating(p.id, Math.min(5, Math.max(0, parseFloat(e.target.value) || 0)))}
-                                      className="w-10 bg-transparent border-none text-[10px] text-amber-500 font-bold focus:ring-0 p-0"
-                                    />
-                                  </div>
-                                )}
                               </div>
                             </div>
                             <div className="flex items-center gap-1">
@@ -917,16 +855,6 @@ export default function App() {
                   <div className="bg-white p-4 text-slate-950 flex justify-between items-center">
                     <div>
                       <h3 className="font-bold">Time B</h3>
-                      {showRatings && (
-                        <div className="flex items-center gap-2">
-                          <p className="text-slate-500 text-xs font-medium">Soma: {teamBScore.toFixed(2)}</p>
-                          {imbalance > 0 && (
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${imbalance > 0.15 ? 'bg-rose-500/20 text-rose-600' : 'bg-slate-200 text-slate-500'}`}>
-                              Δ {(imbalance * 100).toFixed(0)}%
-                            </span>
-                          )}
-                        </div>
-                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs bg-slate-200 px-2 py-1 rounded-full">Vitórias: {consecutiveWinsB}</span>
@@ -958,20 +886,6 @@ export default function App() {
                                   {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
                                   {p.name}
                                 </p>
-                                {showRatings && (
-                                  <div className="flex items-center gap-1">
-                                    <span className="text-[10px] text-slate-500">Nota:</span>
-                                    <input 
-                                      type="number" 
-                                      step="0.1"
-                                      min="0"
-                                      max="5"
-                                      value={p.rating}
-                                      onChange={(e) => updatePlayerRating(p.id, Math.min(5, Math.max(0, parseFloat(e.target.value) || 0)))}
-                                      className="w-10 bg-transparent border-none text-[10px] text-amber-500 font-bold focus:ring-0 p-0"
-                                    />
-                                  </div>
-                                )}
                               </div>
                             </div>
                             <div className="flex items-center gap-1">
@@ -1100,20 +1014,6 @@ export default function App() {
                                 {index + 1}. {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
                                 {p.name}
                               </p>
-                              {showRatings && (
-                                <div className="flex items-center gap-1">
-                                  <span className="text-[10px] text-slate-500">Nota:</span>
-                                  <input 
-                                    type="number" 
-                                    step="0.1"
-                                    min="0"
-                                    max="5"
-                                    value={p.rating}
-                                    onChange={(e) => updatePlayerRating(p.id, Math.min(5, Math.max(0, parseFloat(e.target.value) || 0)))}
-                                    className="w-10 bg-transparent border-none text-[10px] text-amber-500 font-bold focus:ring-0 p-0"
-                                  />
-                                </div>
-                              )}
                             </div>
                           </div>
                           <div className="flex items-center gap-1">
@@ -1174,32 +1074,22 @@ export default function App() {
                   <UserPlus className="w-5 h-5 text-amber-500" />
                   Novo Jogador / Convidado
                 </h3>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col md:flex-row gap-3">
                   <input 
                     type="text" 
                     placeholder="Nome" 
                     value={newPlayerName}
                     onChange={e => setNewPlayerName(e.target.value)}
-                    className="col-span-2 p-3 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-200 focus:ring-2 focus:ring-amber-500 outline-none placeholder:text-slate-600"
+                    className="flex-1 p-3 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-200 focus:ring-2 focus:ring-amber-500 outline-none placeholder:text-slate-600"
                   />
                   <select 
                     value={newPlayerGender}
                     onChange={e => setNewPlayerGender(e.target.value as Gender)}
-                    className="p-3 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-200 focus:ring-2 focus:ring-amber-500 outline-none"
+                    className="md:w-48 p-3 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-200 focus:ring-2 focus:ring-amber-500 outline-none"
                   >
                     <option value="H">Homem (H)</option>
                     <option value="M">Mulher (M)</option>
                   </select>
-                  <input 
-                    type="number" 
-                    step="0.01"
-                    min="0"
-                    max="5"
-                    placeholder="Nota (0 a 5)" 
-                    value={newPlayerRating}
-                    onChange={e => setNewPlayerRating(e.target.value)}
-                    className="p-3 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-200 focus:ring-2 focus:ring-amber-500 outline-none placeholder:text-slate-600"
-                  />
                 </div>
                 <button type="submit" className="w-full py-3 bg-amber-500 text-slate-950 rounded-xl font-bold hover:bg-amber-400 transition-all">
                   CADASTRAR
@@ -1211,12 +1101,6 @@ export default function App() {
                 <div className="flex justify-between items-center mb-4">
                   <div>
                     <h3 className="font-bold text-slate-200">Jogadores FORA DE JOGO</h3>
-                    <button 
-                      onClick={() => setIsBulkEditingRatings(!isBulkEditingRatings)}
-                      className={`text-[10px] font-bold px-2 py-1 rounded mt-1 transition-colors ${isBulkEditingRatings ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
-                    >
-                      {isBulkEditingRatings ? 'CONCLUIR EDIÇÃO' : 'EDITAR TODAS AS NOTAS'}
-                    </button>
                   </div>
                   <button 
                     onClick={() => {
@@ -1251,30 +1135,21 @@ export default function App() {
                       <div key={p.id} className="p-3 rounded-xl bg-slate-800/50 border border-slate-800 hover:border-amber-500/30 transition-colors">
                         {editingPlayerId === p.id ? (
                           <div className="space-y-3">
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="flex gap-2">
                               <input 
                                 type="text" 
                                 value={editName}
                                 onChange={e => setEditName(e.target.value)}
-                                className="col-span-2 p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
+                                className="flex-1 p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
                               />
                               <select 
                                 value={editGender}
                                 onChange={e => setEditGender(e.target.value as Gender)}
-                                className="p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
+                                className="w-16 p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
                               >
                                 <option value="H">H</option>
                                 <option value="M">M</option>
                               </select>
-                              <input 
-                                type="number" 
-                                step="0.01"
-                                min="0"
-                                max="5"
-                                value={editRating}
-                                onChange={e => setEditRating(e.target.value)}
-                                className="p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
-                              />
                             </div>
                             <div className="flex gap-2">
                               <button 
@@ -1305,24 +1180,6 @@ export default function App() {
                                   </p>
                                   {isInGame && <span className="text-[8px] bg-amber-500/20 text-amber-500 px-1 rounded">EM JOGO</span>}
                                 </div>
-                                {showRatings && (
-                                  isBulkEditingRatings ? (
-                                    <div className="flex items-center gap-1 mt-1">
-                                      <span className="text-[10px] text-slate-500">Nota:</span>
-                                      <input 
-                                        type="number" 
-                                        step="0.1"
-                                        min="0"
-                                        max="5"
-                                        value={p.rating}
-                                        onChange={(e) => updatePlayerRating(p.id, Math.min(5, Math.max(0, parseFloat(e.target.value) || 0)))}
-                                        className="w-12 bg-slate-800 border border-slate-700 rounded px-1 text-[10px] text-amber-500 font-bold focus:ring-1 focus:ring-amber-500 outline-none"
-                                      />
-                                    </div>
-                                  ) : (
-                                    <p className="text-[10px] text-slate-500">Nota: {p.rating}</p>
-                                  )
-                                )}
                               </div>
                             </div>
                             <div className="flex items-center gap-1">
