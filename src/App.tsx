@@ -580,29 +580,43 @@ export default function App() {
     
     const numNeededFromLosers = 6 - playersFromWaitlist.length;
     const playersFromLosers = losingTeam.slice(0, numNeededFromLosers);
-    
-    const newChallengerTeam = [...playersFromWaitlist, ...playersFromLosers];
     const remainingLosers = losingTeam.slice(numNeededFromLosers);
     
-    // UPDATE QUEUE NUMBERS for players going to waitlist
+    // UPDATE QUEUE NUMBERS:
+    // - Losers who stay on court (playersFromLosers) get new, larger queue numbers to place them behind waitlist entrants
+    // - Losers who go back to waitlist (remainingLosers) get even larger queue numbers to place them behind the stayed losers
     let currentNext = nextQueueNumber;
-    const losersWithNewNumbers = remainingLosers.map(p => {
+    
+    const losersStayingWithNewNumbers = playersFromLosers.map(p => {
       const updated = { ...p, queueNumber: currentNext };
       currentNext++;
       return updated;
     });
 
-    // Update allPlayers with new queue numbers
+    const losersGoingWithNewNumbers = remainingLosers.map(p => {
+      const updated = { ...p, queueNumber: currentNext };
+      currentNext++;
+      return updated;
+    });
+
+    const newChallengerTeam = [...playersFromWaitlist, ...losersStayingWithNewNumbers];
+
+    // Update allPlayers with new queue numbers for both staying and going losers
     const updatedAllPlayers = allPlayers.map(p => {
-      const updatedLoser = losersWithNewNumbers.find(l => l.id === p.id);
-      return updatedLoser || p;
+      const updatedStaying = losersStayingWithNewNumbers.find(l => l.id === p.id);
+      if (updatedStaying) return updatedStaying;
+      
+      const updatedGoing = losersGoingWithNewNumbers.find(l => l.id === p.id);
+      if (updatedGoing) return updatedGoing;
+      
+      return p;
     });
 
     let newTeamA = winner === 'A' ? winningTeam : newChallengerTeam;
     let newTeamB = winner === 'B' ? winningTeam : newChallengerTeam;
     
     // New waitlist: remaining waitlist + remaining losers (with updated IDs)
-    const newWaitlist = [...waitlist.slice(numFromWaitlist), ...losersWithNewNumbers.map(p => p.id)];
+    const newWaitlist = [...waitlist.slice(numFromWaitlist), ...losersGoingWithNewNumbers.map(p => p.id)];
 
     setConsecutiveWinsA(finalWinsA);
     setConsecutiveWinsB(finalWinsB);
