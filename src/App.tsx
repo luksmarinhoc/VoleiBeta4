@@ -120,6 +120,8 @@ export default function App() {
     return () => unsubscribe();
   }, [isAuthReady]);
 
+  const [showRatings, setShowRatings] = useState(true);
+
   // Sync State from Firestore
   useEffect(() => {
     if (!isAuthReady) return;
@@ -133,6 +135,9 @@ export default function App() {
         setConsecutiveWinsB(data.consecutiveWinsB || 0);
         setNextQueueNumber(data.nextQueueNumber || 1);
         setLockedPlayers(new Set(data.lockedPlayers || []));
+        if (data.showRatings !== undefined) {
+          setShowRatings(data.showRatings);
+        }
       }
     });
     return () => unsubscribe();
@@ -150,12 +155,13 @@ export default function App() {
         consecutiveWinsB,
         nextQueueNumber,
         lockedPlayers: Array.from(lockedPlayers),
+        showRatings,
         ...updates
       }, { merge: true });
     } catch (e) {
       console.error("Error syncing state:", e);
     }
-  }, [isAuthReady, waitlist, teamA, teamB, consecutiveWinsA, consecutiveWinsB, nextQueueNumber, lockedPlayers]);
+  }, [isAuthReady, waitlist, teamA, teamB, consecutiveWinsA, consecutiveWinsB, nextQueueNumber, lockedPlayers, showRatings]);
 
   const syncPlayerToFirebase = async (player: Player) => {
     if (!isAuthReady) return;
@@ -174,12 +180,14 @@ export default function App() {
   // UI State
   const [newPlayerName, setNewPlayerName] = useState('');
   const [newPlayerGender, setNewPlayerGender] = useState<Gender>('H');
+  const [newPlayerRating, setNewPlayerRating] = useState<number>(3.0);
   const [activeTab, setActiveTab] = useState<'court' | 'waitlist' | 'inactive'>('court');
 
   // Editing State
   const [editingPlayerId, setEditingPlayerId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editGender, setEditGender] = useState<Gender>('H');
+  const [editRating, setEditRating] = useState<number>(3.0);
 
   const saveHistory = useCallback(() => {
     setHistory(prev => [
@@ -328,11 +336,12 @@ export default function App() {
       id: Math.random().toString(36).substr(2, 9),
       name: newPlayerName,
       gender: newPlayerGender,
-      rating: 3.0,
+      rating: newPlayerRating,
       isGuest: true
     };
     setAllPlayers(prev => [...prev, newPlayer]);
     setNewPlayerName('');
+    setNewPlayerRating(3.0);
     syncPlayerToFirebase(newPlayer);
   };
 
@@ -340,6 +349,7 @@ export default function App() {
     setEditingPlayerId(p.id);
     setEditName(p.name);
     setEditGender(p.gender);
+    setEditRating(p.rating || 3.0);
   };
 
   const cancelEditing = () => {
@@ -348,7 +358,7 @@ export default function App() {
 
   const savePlayerEdit = (id: string) => {
     const existingPlayer = allPlayers.find(p => p.id === id)!;
-    const updatedPlayer = { ...existingPlayer, name: editName, gender: editGender };
+    const updatedPlayer = { ...existingPlayer, name: editName, gender: editGender, rating: editRating };
     
     setAllPlayers(prev => prev.map(p => p.id === id ? updatedPlayer : p));
     setTeamA(prev => prev.map(p => p.id === id ? updatedPlayer : p));
@@ -383,6 +393,40 @@ export default function App() {
       teamB: newTeamB,
       lockedPlayers: Array.from(newLocked)
     });
+  };
+
+  const restoreOriginalRatings = async () => {
+    if (window.confirm('Deseja restaurar as notas (avaliações) originais de todos os jogadores padrão no banco de dados? Isso não removerá novos jogadores, apenas redefinirá as notas dos jogadores originais.')) {
+      saveHistory();
+      
+      const updatedPlayers = allPlayers.map(p => {
+        const original = INITIAL_PLAYERS.find(op => op.id === p.id);
+        if (original) {
+          return { ...p, rating: original.rating };
+        }
+        return p;
+      });
+      
+      setAllPlayers(updatedPlayers);
+      
+      const updatedTeamA = teamA.map(p => {
+        const original = INITIAL_PLAYERS.find(op => op.id === p.id);
+        return original ? { ...p, rating: original.rating } : p;
+      });
+      const updatedTeamB = teamB.map(p => {
+        const original = INITIAL_PLAYERS.find(op => op.id === p.id);
+        return original ? { ...p, rating: original.rating } : p;
+      });
+      setTeamA(updatedTeamA);
+      setTeamB(updatedTeamB);
+
+      await syncAllPlayersToFirebase(updatedPlayers);
+      await syncStateToFirebase({
+        teamA: updatedTeamA,
+        teamB: updatedTeamB
+      });
+      alert('Notas originais restauradas com sucesso!');
+    }
   };
 
   const toggleLock = (id: string) => {
@@ -718,6 +762,17 @@ export default function App() {
               </button>
             )}
             <button 
+              onClick={() => {
+                const next = !showRatings;
+                setShowRatings(next);
+                syncStateToFirebase({ showRatings: next });
+              }}
+              className={`p-2 rounded-full transition-colors ${showRatings ? 'text-amber-500 hover:bg-slate-800' : 'text-slate-500 hover:bg-slate-800'}`}
+              title={showRatings ? "Ocultar Notas" : "Mostrar Notas"}
+            >
+              {showRatings ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
+            </button>
+            <button 
               onClick={revertLastAction}
               disabled={history.length === 0}
               className="p-2 hover:bg-slate-800 rounded-full transition-colors disabled:opacity-50"
@@ -875,6 +930,11 @@ export default function App() {
                                 <p className="text-sm font-semibold text-slate-200">
                                   {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
                                   {p.name}
+                                  {showRatings && p.rating !== undefined && (
+                                    <span className="ml-1.5 text-xs text-amber-500 bg-amber-500/10 px-1 rounded font-medium">
+                                      ★ {p.rating.toFixed(2)}
+                                    </span>
+                                  )}
                                 </p>
                               </div>
                             </div>
@@ -967,6 +1027,11 @@ export default function App() {
                                 <p className="text-sm font-semibold text-slate-200">
                                   {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
                                   {p.name}
+                                  {showRatings && p.rating !== undefined && (
+                                    <span className="ml-1.5 text-xs text-amber-500 bg-amber-500/10 px-1 rounded font-medium">
+                                      ★ {p.rating.toFixed(2)}
+                                    </span>
+                                  )}
                                 </p>
                               </div>
                             </div>
@@ -1095,6 +1160,11 @@ export default function App() {
                               <p className="text-sm font-bold text-slate-200">
                                 {index + 1}. {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
                                 {p.name}
+                                {showRatings && p.rating !== undefined && (
+                                  <span className="ml-1.5 text-xs text-amber-500 bg-amber-500/10 px-1 rounded font-medium">
+                                    ★ {p.rating.toFixed(2)}
+                                  </span>
+                                )}
                               </p>
                             </div>
                           </div>
@@ -1172,6 +1242,16 @@ export default function App() {
                     <option value="H">Homem (H)</option>
                     <option value="M">Mulher (M)</option>
                   </select>
+                  <input 
+                    type="number" 
+                    step="0.01"
+                    min="0"
+                    max="5"
+                    placeholder="Nota (0-5)" 
+                    value={newPlayerRating}
+                    onChange={e => setNewPlayerRating(parseFloat(e.target.value) || 0)}
+                    className="md:w-32 p-3 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-200 focus:ring-2 focus:ring-amber-500 outline-none placeholder:text-slate-600"
+                  />
                 </div>
                 <button type="submit" className="w-full py-3 bg-amber-500 text-slate-950 rounded-xl font-bold hover:bg-amber-400 transition-all">
                   CADASTRAR
@@ -1184,22 +1264,42 @@ export default function App() {
                   <div>
                     <h3 className="font-bold text-slate-200">Jogadores FORA DE JOGO</h3>
                   </div>
-                  <button 
-                    onClick={() => {
-                      if (window.confirm('Deseja resetar todos os jogadores para a lista inicial? Isso apagará jogadores novos e resetará a contagem da fila.')) {
-                        saveHistory();
-                        setAllPlayers(INITIAL_PLAYERS);
-                        setWaitlist([]);
-                        setTeamA([]);
-                        setTeamB([]);
-                        setLockedPlayers(new Set());
-                        setNextQueueNumber(1);
-                      }
-                    }}
-                    className="text-[10px] text-slate-500 hover:text-rose-500 transition-colors"
-                  >
-                    RESETAR LISTA
-                  </button>
+                  <div className="flex gap-3">
+                    <button 
+                      onClick={restoreOriginalRatings}
+                      className="text-[10px] font-bold text-amber-500 hover:text-amber-400 transition-colors uppercase"
+                    >
+                      Restaurar Notas Originais
+                    </button>
+                    <button 
+                      onClick={() => {
+                        if (window.confirm('Deseja resetar todos os jogadores para a lista inicial? Isso apagará jogadores novos e resetará a contagem da fila.')) {
+                          saveHistory();
+                          setAllPlayers(INITIAL_PLAYERS);
+                          setWaitlist([]);
+                          setTeamA([]);
+                          setTeamB([]);
+                          setLockedPlayers(new Set());
+                          setNextQueueNumber(1);
+
+                          // Sync immediately to Firebase
+                          syncAllPlayersToFirebase(INITIAL_PLAYERS);
+                          syncStateToFirebase({
+                            teamA: [],
+                            teamB: [],
+                            waitlist: [],
+                            consecutiveWinsA: 0,
+                            consecutiveWinsB: 0,
+                            nextQueueNumber: 1,
+                            lockedPlayers: []
+                          });
+                        }
+                      }}
+                      className="text-[10px] font-bold text-slate-500 hover:text-rose-500 transition-colors uppercase"
+                    >
+                      RESETAR LISTA
+                    </button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 gap-2">
                   {[...allPlayers].sort((a, b) => {
@@ -1217,21 +1317,33 @@ export default function App() {
                       <div key={p.id} className="p-3 rounded-xl bg-slate-800/50 border border-slate-800 hover:border-amber-500/30 transition-colors">
                         {editingPlayerId === p.id ? (
                           <div className="space-y-3">
-                            <div className="flex gap-2">
+                            <div className="flex flex-col md:flex-row gap-2">
                               <input 
                                 type="text" 
                                 value={editName}
                                 onChange={e => setEditName(e.target.value)}
                                 className="flex-1 p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
                               />
-                              <select 
-                                value={editGender}
-                                onChange={e => setEditGender(e.target.value as Gender)}
-                                className="w-16 p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
-                              >
-                                <option value="H">H</option>
-                                <option value="M">M</option>
-                              </select>
+                              <div className="flex gap-2">
+                                <select 
+                                  value={editGender}
+                                  onChange={e => setEditGender(e.target.value as Gender)}
+                                  className="w-16 p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
+                                >
+                                  <option value="H">H</option>
+                                  <option value="M">M</option>
+                                </select>
+                                <input 
+                                  type="number" 
+                                  step="0.01"
+                                  min="0"
+                                  max="5"
+                                  placeholder="Nota"
+                                  value={editRating}
+                                  onChange={e => setEditRating(parseFloat(e.target.value) || 0)}
+                                  className="w-20 p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
+                                />
+                              </div>
                             </div>
                             <div className="flex gap-2">
                               <button 
@@ -1259,6 +1371,11 @@ export default function App() {
                                   <p className="text-sm font-semibold text-slate-200">
                                     {isInGame && p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
                                     {p.name}
+                                    {showRatings && p.rating !== undefined && (
+                                      <span className="ml-1.5 text-xs text-amber-500 bg-amber-500/10 px-1 rounded font-medium">
+                                        ★ {p.rating.toFixed(2)}
+                                      </span>
+                                    )}
                                   </p>
                                   {isInGame && <span className="text-[8px] bg-amber-500/20 text-amber-500 px-1 rounded">EM JOGO</span>}
                                 </div>
