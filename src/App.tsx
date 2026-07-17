@@ -514,10 +514,12 @@ export default function App() {
   };
 
   const sortTeamByPriority = useCallback((team: Player[]) => {
+    const isIncoming = (p: Player) => p.queueNumber === undefined || p.queueNumber >= 13;
     return [...team].sort((a, b) => {
-      const qA = a.queueNumber ?? 999999;
-      const qB = b.queueNumber ?? 999999;
-      return qA - qB;
+      const aInc = isIncoming(a) ? 1 : 0;
+      const bInc = isIncoming(b) ? 1 : 0;
+      if (aInc !== bInc) return bInc - aInc; // Incoming/waitlist first
+      return (a.queueNumber ?? 999999) - (b.queueNumber ?? 999999);
     });
   }, []);
 
@@ -654,16 +656,34 @@ export default function App() {
   };
 
   const mixTeams = () => {
-    const onCourt = [...teamA, ...teamB];
-    if (onCourt.length === 0) return;
     saveHistory();
-    const { teamA: newA, teamB: newB } = balanceTeams(onCourt);
+    
+    // 1. Get current court players
+    const currentOnCourt = [...teamA, ...teamB];
+    
+    // 2. See how many players are needed to reach 12 on court
+    const needed = 12 - currentOnCourt.length;
+    
+    // 3. Take from waitlist if needed to complete the 12 players
+    const fromWaitlistCount = Math.min(waitlist.length, Math.max(0, needed));
+    const playersFromWaitlist = waitlist.slice(0, fromWaitlistCount).map(id => allPlayers.find(p => p.id === id)!).filter(Boolean);
+    const remainingWaitlistIds = waitlist.slice(fromWaitlistCount);
+    
+    // 4. Combine them to get the 12 players for the court
+    const allCourtPlayers = [...currentOnCourt, ...playersFromWaitlist];
+    
+    if (allCourtPlayers.length === 0) return;
+
+    // 5. Balance/mix them
+    const { teamA: mixedA, teamB: mixedB } = balanceTeams(allCourtPlayers);
     
     // Clear consecutive wins
     setConsecutiveWinsA(0);
     setConsecutiveWinsB(0);
     
-    updateTeamsAndQueue(newA, newB, waitlist);
+    // 6. Update teams, reassign queue numbers, and sync
+    updateTeamsAndQueue(mixedA, mixedB, remainingWaitlistIds);
+    
     syncStateToFirebase({
       consecutiveWinsA: 0,
       consecutiveWinsB: 0
@@ -760,12 +780,39 @@ export default function App() {
     
     // Update wins
     const newConsecutiveWins = (winner === 'A' ? consecutiveWinsA : consecutiveWinsB) + 1;
-    let finalWinsA = winner === 'A' ? newConsecutiveWins : 0;
-    let finalWinsB = winner === 'B' ? newConsecutiveWins : 0;
+    
+    if (newConsecutiveWins >= 3) {
+      // 3 wins rule: both teams leave the court and go to the waitlist!
+      // Losing team goes first, then winning team.
+      const newWaitlistAfterLeaving = [...waitlist, ...losingTeam.map(p => p.id), ...winningTeam.map(p => p.id)];
+      
+      // We need 12 players for the court
+      const courtPlayerIds = newWaitlistAfterLeaving.slice(0, 12);
+      const remainingWaitlistIds = newWaitlistAfterLeaving.slice(12);
+      
+      const courtPlayers = courtPlayerIds.map(id => allPlayers.find(p => p.id === id)!).filter(Boolean);
+      
+      // Balance/mix the teams on court
+      const { teamA: mixedA, teamB: mixedB } = balanceTeams(courtPlayers);
+      
+      setConsecutiveWinsA(0);
+      setConsecutiveWinsB(0);
+      
+      updateTeamsAndQueue(mixedA, mixedB, remainingWaitlistIds);
+      
+      syncStateToFirebase({
+        consecutiveWinsA: 0,
+        consecutiveWinsB: 0
+      });
+      return;
+    }
 
-    // Logic for next team:
-    // 1. Take as many as possible from waitlist (up to 6)
-    // 2. If waitlist has < 6, take from the losing team to complete 6
+    // Normal win logic (consecutive wins < 3):
+    // 1. Winning team stays.
+    // 2. Losing team goes to the waitlist.
+    const newWaitlistAfterLosing = [...waitlist, ...losingTeam.map(p => p.id)];
+    
+    // 3. Take as many as possible from waitlist to complete 12 players on court
     const numFromWaitlist = Math.min(waitlist.length, 6);
     const playersFromWaitlist = waitlist.slice(0, numFromWaitlist).map(id => allPlayers.find(p => p.id === id)!).filter(Boolean);
     
@@ -781,12 +828,15 @@ export default function App() {
     let newTeamA = winner === 'A' ? winningTeam : newChallengerTeam;
     let newTeamB = winner === 'B' ? winningTeam : newChallengerTeam;
     
-    const newWaitlist = [...remainingWaitlist.map(p => p.id), ...remainingLosers.map(p => p.id)];
+    const finalWaitlist = [...remainingWaitlist.map(p => p.id), ...remainingLosers.map(p => p.id)];
+
+    let finalWinsA = winner === 'A' ? newConsecutiveWins : 0;
+    let finalWinsB = winner === 'B' ? newConsecutiveWins : 0;
 
     setConsecutiveWinsA(finalWinsA);
     setConsecutiveWinsB(finalWinsB);
 
-    updateTeamsAndQueue(newTeamA, newTeamB, newWaitlist);
+    updateTeamsAndQueue(newTeamA, newTeamB, finalWaitlist);
     
     syncStateToFirebase({
       consecutiveWinsA: finalWinsA,
