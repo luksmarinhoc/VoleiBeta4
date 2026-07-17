@@ -847,8 +847,15 @@ export default function App() {
     return sum / ratedPlayers.length;
   };
 
+  const getTeamSum = (team: Player[]) => {
+    const ratedPlayers = team.filter(p => p.rating !== undefined);
+    return ratedPlayers.reduce((acc, p) => acc + (p.rating ?? 0), 0);
+  };
+
   const avgRatingA = getTeamAverage(teamA);
   const avgRatingB = getTeamAverage(teamB);
+  const sumRatingA = getTeamSum(teamA);
+  const sumRatingB = getTeamSum(teamB);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-20">
@@ -1063,12 +1070,17 @@ export default function App() {
                 <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden">
                   <div className="bg-amber-500 p-4 text-slate-950 flex justify-between items-center">
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="font-bold">Time A</h3>
                         {showRatings && teamA.length > 0 && (
-                          <span className="text-xs bg-amber-600/30 px-2 py-0.5 rounded-full font-bold">
-                            Média: {avgRatingA.toFixed(1)}
-                          </span>
+                          <div className="flex gap-1 flex-wrap">
+                            <span className="text-xs bg-amber-600/30 px-2 py-0.5 rounded-full font-bold">
+                              Média: {avgRatingA.toFixed(1)}
+                            </span>
+                            <span className="text-xs bg-amber-600/30 px-2 py-0.5 rounded-full font-bold">
+                              Soma: {sumRatingA.toFixed(1)}
+                            </span>
+                          </div>
                         )}
                       </div>
                       {teamA.length > 0 && (
@@ -1167,12 +1179,17 @@ export default function App() {
                 <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden">
                   <div className="bg-white p-4 text-slate-950 flex justify-between items-center">
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="font-bold">Time B</h3>
                         {showRatings && teamB.length > 0 && (
-                          <span className="text-xs bg-slate-200 px-2 py-0.5 rounded-full font-bold">
-                            Média: {avgRatingB.toFixed(1)}
-                          </span>
+                          <div className="flex gap-1 flex-wrap">
+                            <span className="text-xs bg-slate-200 px-2 py-0.5 rounded-full font-bold">
+                              Média: {avgRatingB.toFixed(1)}
+                            </span>
+                            <span className="text-xs bg-slate-200 px-2 py-0.5 rounded-full font-bold">
+                              Soma: {sumRatingB.toFixed(1)}
+                            </span>
+                          </div>
                         )}
                       </div>
                       {teamB.length > 0 && (
