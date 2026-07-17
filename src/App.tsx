@@ -121,6 +121,7 @@ export default function App() {
   }, [isAuthReady]);
 
   const [showRatings, setShowRatings] = useState(true);
+  const [divisionMethod, setDivisionMethod] = useState<'balanced' | 'alternating'>('balanced');
 
   // Sync State from Firestore
   useEffect(() => {
@@ -138,6 +139,9 @@ export default function App() {
         if (data.showRatings !== undefined) {
           setShowRatings(data.showRatings);
         }
+        if (data.divisionMethod !== undefined) {
+          setDivisionMethod(data.divisionMethod);
+        }
       }
     });
     return () => unsubscribe();
@@ -147,7 +151,8 @@ export default function App() {
   const syncStateToFirebase = useCallback(async (updates: any) => {
     if (!isAuthReady) return;
     try {
-      await setDoc(doc(db, 'state', 'current'), {
+      const cleanData = (obj: any) => JSON.parse(JSON.stringify(obj));
+      const stateData = cleanData({
         waitlist,
         teamA,
         teamB,
@@ -156,23 +161,27 @@ export default function App() {
         nextQueueNumber,
         lockedPlayers: Array.from(lockedPlayers),
         showRatings,
+        divisionMethod,
         ...updates
-      }, { merge: true });
+      });
+      await setDoc(doc(db, 'state', 'current'), stateData, { merge: true });
     } catch (e) {
       console.error("Error syncing state:", e);
     }
-  }, [isAuthReady, waitlist, teamA, teamB, consecutiveWinsA, consecutiveWinsB, nextQueueNumber, lockedPlayers, showRatings]);
+  }, [isAuthReady, waitlist, teamA, teamB, consecutiveWinsA, consecutiveWinsB, nextQueueNumber, lockedPlayers, showRatings, divisionMethod]);
 
   const syncPlayerToFirebase = async (player: Player) => {
     if (!isAuthReady) return;
-    await setDoc(doc(db, 'players', player.id), player);
+    const cleanPlayer = JSON.parse(JSON.stringify(player));
+    await setDoc(doc(db, 'players', player.id), cleanPlayer);
   };
 
   const syncAllPlayersToFirebase = async (players: Player[]) => {
     if (!isAuthReady) return;
     const batch = writeBatch(db);
     players.forEach(p => {
-      batch.set(doc(db, 'players', p.id), p);
+      const cleanPlayer = JSON.parse(JSON.stringify(p));
+      batch.set(doc(db, 'players', p.id), cleanPlayer);
     });
     await batch.commit();
   };
@@ -526,6 +535,53 @@ export default function App() {
   const balanceTeams = (players: Player[]) => {
     if (players.length === 0) return { teamA: [], teamB: [] };
 
+    if (divisionMethod === 'alternating') {
+      const tA: Player[] = [];
+      const tB: Player[] = [];
+
+      // Sort all players by queueNumber (arrival order)
+      const sortedPlayers = [...players].sort((a, b) => {
+        const qA = a.queueNumber ?? 999999;
+        const qB = b.queueNumber ?? 999999;
+        return qA - qB;
+      });
+
+      const women = sortedPlayers.filter(p => p.gender === 'M');
+      const men = sortedPlayers.filter(p => p.gender === 'H');
+
+      // Alternate women to ensure perfect gender balance
+      women.forEach((p, index) => {
+        if (index % 2 === 0) {
+          tA.push(p);
+        } else {
+          tB.push(p);
+        }
+      });
+
+      // Alternate men, but offset based on team size to keep them balanced
+      men.forEach((p, index) => {
+        const targetAFirst = tA.length <= tB.length;
+        if (targetAFirst) {
+          if (index % 2 === 0) {
+            tA.push(p);
+          } else {
+            tB.push(p);
+          }
+        } else {
+          if (index % 2 === 0) {
+            tB.push(p);
+          } else {
+            tA.push(p);
+          }
+        }
+      });
+
+      return {
+        teamA: tA.sort((a, b) => (a.queueNumber ?? 0) - (b.queueNumber ?? 0)),
+        teamB: tB.sort((a, b) => (a.queueNumber ?? 0) - (b.queueNumber ?? 0))
+      };
+    }
+
     const half = Math.ceil(players.length / 2);
     
     // Shuffle players first to ensure different results on each mix
@@ -594,11 +650,32 @@ export default function App() {
 
     saveHistory();
     
-    const playersForA = toAdd.slice(0, neededA);
-    const playersForB = toAdd.slice(neededA);
+    const newA = [...teamA];
+    const newB = [...teamB];
 
-    const newA = [...teamA, ...playersForA];
-    const newB = [...teamB, ...playersForB];
+    if (divisionMethod === 'alternating') {
+      // Alternate adding players from the waitlist to the teams that need them, 
+      // keeping the teams balanced.
+      let turnToA = newA.length <= newB.length;
+      toAdd.forEach(player => {
+        if (newA.length < 6 && (newB.length === 6 || turnToA)) {
+          newA.push(player);
+          turnToA = false;
+        } else if (newB.length < 6) {
+          newB.push(player);
+          turnToA = true;
+        } else {
+          newA.push(player);
+          turnToA = false;
+        }
+      });
+    } else {
+      const playersForA = toAdd.slice(0, neededA);
+      const playersForB = toAdd.slice(neededA);
+      newA.push(...playersForA);
+      newB.push(...playersForB);
+    }
+
     const newWaitlist = waitlist.slice(toAdd.length);
 
     setTeamA(newA);
@@ -610,7 +687,7 @@ export default function App() {
       teamB: newB,
       waitlist: newWaitlist
     });
-  }, [teamA, teamB, waitlist, allPlayers, saveHistory, syncStateToFirebase]);
+  }, [teamA, teamB, waitlist, allPlayers, saveHistory, syncStateToFirebase, divisionMethod]);
 
   const handleWin = (winner: 'A' | 'B') => {
     saveHistory();
@@ -841,6 +918,52 @@ export default function App() {
                   <UserPlus className="w-5 h-5" />
                   COMPLETAR QUADRA
                 </button>
+              </div>
+
+              {/* Division Method Selector */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                    <Users className="w-4 h-4 text-amber-500" />
+                    Método de Divisão de Equipes
+                  </h4>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    {divisionMethod === 'balanced' 
+                      ? "Foca no equilíbrio geral balanceando por nível técnico e gênero através de sorteio." 
+                      : "Distribui os jogadores alternadamente pela ordem de chegada/espera (1,3,5... no Time A e 2,4,6... no Time B), respeitando o gênero."
+                    }
+                  </p>
+                </div>
+                <div className="flex gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 self-start md:self-auto">
+                  <button
+                    onClick={() => {
+                      setDivisionMethod('balanced');
+                      syncStateToFirebase({ divisionMethod: 'balanced' });
+                    }}
+                    className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                      divisionMethod === 'balanced' 
+                        ? 'bg-amber-500 text-slate-950 shadow-md font-bold' 
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Shuffle className="w-3.5 h-3.5" />
+                    Equilibrado (Nível)
+                  </button>
+                  <button
+                    onClick={() => {
+                      setDivisionMethod('alternating');
+                      syncStateToFirebase({ divisionMethod: 'alternating' });
+                    }}
+                    className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                      divisionMethod === 'alternating' 
+                        ? 'bg-amber-500 text-slate-950 shadow-md font-bold' 
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <ArrowLeftRight className="w-3.5 h-3.5" />
+                    Alternado (Fila)
+                  </button>
+                </div>
               </div>
 
               {/* Status Alerts */}
