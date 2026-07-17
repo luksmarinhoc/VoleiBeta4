@@ -582,34 +582,47 @@ export default function App() {
       };
     }
 
-    const half = Math.ceil(players.length / 2);
-    
-    // Shuffle players first to ensure different results on each mix
-    const shuffled = [...players].sort(() => Math.random() - 0.5);
-    
-    const women = shuffled.filter(p => p.gender === 'M');
-    const men = shuffled.filter(p => p.gender === 'H');
+    // Balanced Mode: Balance by both rating AND gender!
+    // Sort players by rating descending
+    const sortedPlayers = [...players].sort((a, b) => b.rating - a.rating);
+
+    const women = sortedPlayers.filter(p => p.gender === 'M');
+    const men = sortedPlayers.filter(p => p.gender === 'H');
 
     const tA: Player[] = [];
     const tB: Player[] = [];
 
-    // Distribute women first to ensure gender balance
-    women.forEach((p) => {
-      if (tA.length < half && (tB.length === half || tA.length <= tB.length)) {
+    const getTeamRatingSum = (team: Player[]) => team.reduce((sum, p) => sum + p.rating, 0);
+
+    // Distribute women first (by rating descending) to ensure gender balance and level balance
+    women.forEach(p => {
+      if (tA.length < tB.length) {
         tA.push(p);
-      } else if (tB.length < half) {
+      } else if (tB.length < tA.length) {
         tB.push(p);
       } else {
-        tA.push(p);
+        // Equal sizes, put in the team with the lower rating sum
+        if (getTeamRatingSum(tA) <= getTeamRatingSum(tB)) {
+          tA.push(p);
+        } else {
+          tB.push(p);
+        }
       }
     });
 
-    // Distribute men to balance team sizes
+    // Distribute men next (by rating descending)
     men.forEach(p => {
-      if (tA.length < half && (tB.length === half || tA.length <= tB.length)) {
+      if (tA.length < tB.length) {
         tA.push(p);
-      } else {
+      } else if (tB.length < tA.length) {
         tB.push(p);
+      } else {
+        // Equal sizes, put in the team with the lower rating sum
+        if (getTeamRatingSum(tA) <= getTeamRatingSum(tB)) {
+          tA.push(p);
+        } else {
+          tB.push(p);
+        }
       }
     });
 
@@ -670,10 +683,55 @@ export default function App() {
         }
       });
     } else {
-      const playersForA = toAdd.slice(0, neededA);
-      const playersForB = toAdd.slice(neededA);
-      newA.push(...playersForA);
-      newB.push(...playersForB);
+      // Balanced mode distribution of incoming players from the waitlist:
+      // Sort incoming players by rating descending
+      const sortedToAdd = [...toAdd].sort((a, b) => b.rating - a.rating);
+      
+      const getTeamRatingSum = (team: Player[]) => team.reduce((sum, p) => sum + p.rating, 0);
+      const getTeamGenderCount = (team: Player[], g: Gender) => team.filter(p => p.gender === g).length;
+
+      // Distribute sortedToAdd one by one to keep the resulting teams balanced by rating and gender
+      sortedToAdd.forEach(p => {
+        const canGoToA = newA.length < 6;
+        const canGoToB = newB.length < 6;
+
+        if (canGoToA && !canGoToB) {
+          newA.push(p);
+        } else if (!canGoToA && canGoToB) {
+          newB.push(p);
+        } else if (canGoToA && canGoToB) {
+          const femaleDiffA = getTeamGenderCount(newA, 'M');
+          const femaleDiffB = getTeamGenderCount(newB, 'M');
+          
+          if (p.gender === 'M') {
+            if (femaleDiffA < femaleDiffB) {
+              newA.push(p);
+            } else if (femaleDiffB < femaleDiffA) {
+              newB.push(p);
+            } else {
+              if (getTeamRatingSum(newA) <= getTeamRatingSum(newB)) {
+                newA.push(p);
+              } else {
+                newB.push(p);
+              }
+            }
+          } else {
+            const maleDiffA = getTeamGenderCount(newA, 'H');
+            const maleDiffB = getTeamGenderCount(newB, 'H');
+            if (maleDiffA < maleDiffB) {
+              newA.push(p);
+            } else if (maleDiffB < maleDiffA) {
+              newB.push(p);
+            } else {
+              if (getTeamRatingSum(newA) <= getTeamRatingSum(newB)) {
+                newA.push(p);
+              } else {
+                newB.push(p);
+              }
+            }
+          }
+        }
+      });
     }
 
     const newWaitlist = waitlist.slice(toAdd.length);
