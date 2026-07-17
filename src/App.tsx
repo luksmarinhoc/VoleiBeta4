@@ -1063,16 +1063,17 @@ export default function App() {
                 <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden">
                   <div className="bg-amber-500 p-4 text-slate-950 flex justify-between items-center">
                     <div>
-                      <h3 className="font-bold">Time A</h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold">Time A</h3>
+                        {showRatings && teamA.length > 0 && (
+                          <span className="text-xs bg-amber-600/30 px-2 py-0.5 rounded-full font-bold">
+                            Média: {avgRatingA.toFixed(1)}
+                          </span>
+                        )}
+                      </div>
                       {teamA.length > 0 && (
-                        <p className="text-[10px] text-slate-900 font-bold opacity-80 flex items-center gap-1.5 flex-wrap">
-                          <span>{teamA.filter(p => p.gender === 'M').length} ♀ • {teamA.filter(p => p.gender === 'H').length} ♂</span>
-                          {showRatings && (
-                            <>
-                              <span>•</span>
-                              <span className="bg-amber-600/20 px-1 rounded">★ {avgRatingA.toFixed(2)} Média</span>
-                            </>
-                          )}
+                        <p className="text-[10px] text-slate-900 font-bold opacity-80 mt-0.5">
+                          {teamA.filter(p => p.gender === 'M').length} ♀ • {teamA.filter(p => p.gender === 'H').length} ♂
                         </p>
                       )}
                     </div>
@@ -1166,16 +1167,17 @@ export default function App() {
                 <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden">
                   <div className="bg-white p-4 text-slate-950 flex justify-between items-center">
                     <div>
-                      <h3 className="font-bold">Time B</h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold">Time B</h3>
+                        {showRatings && teamB.length > 0 && (
+                          <span className="text-xs bg-slate-200 px-2 py-0.5 rounded-full font-bold">
+                            Média: {avgRatingB.toFixed(1)}
+                          </span>
+                        )}
+                      </div>
                       {teamB.length > 0 && (
-                        <p className="text-[10px] text-slate-500 font-bold opacity-80 flex items-center gap-1.5 flex-wrap">
-                          <span>{teamB.filter(p => p.gender === 'M').length} ♀ • {teamB.filter(p => p.gender === 'H').length} ♂</span>
-                          {showRatings && (
-                            <>
-                              <span>•</span>
-                              <span className="bg-slate-100 px-1 rounded">★ {avgRatingB.toFixed(2)} Média</span>
-                            </>
-                          )}
+                        <p className="text-[10px] text-slate-500 font-bold opacity-80 mt-0.5">
+                          {teamB.filter(p => p.gender === 'M').length} ♀ • {teamB.filter(p => p.gender === 'H').length} ♂
                         </p>
                       )}
                     </div>
