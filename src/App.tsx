@@ -419,27 +419,33 @@ export default function App() {
   const reassignAllQueueNumbers = useCallback((
     currentTeamA: Player[],
     currentTeamB: Player[],
-    currentWaitlist: string[]
+    currentWaitlist: string[],
+    shouldSortByPriority: boolean = false
   ) => {
     // 1. Identify incoming players (those with queueNumber >= 13 or undefined, meaning they just came from waitlist)
     // and staying players (those with queueNumber < 13)
     const isIncoming = (p: Player) => p.queueNumber === undefined || p.queueNumber >= 13;
 
-    // 2. Sort Team A: incoming first (preserving prior order), then staying (preserving prior order)
-    const sortedA = [...currentTeamA].sort((a, b) => {
-      const aInc = isIncoming(a) ? 1 : 0;
-      const bInc = isIncoming(b) ? 1 : 0;
-      if (aInc !== bInc) return bInc - aInc; // Incoming first
-      return (a.queueNumber ?? 999999) - (b.queueNumber ?? 999999);
-    });
+    let sortedA = [...currentTeamA];
+    let sortedB = [...currentTeamB];
 
-    // 3. Sort Team B: incoming first, then staying
-    const sortedB = [...currentTeamB].sort((a, b) => {
-      const aInc = isIncoming(a) ? 1 : 0;
-      const bInc = isIncoming(b) ? 1 : 0;
-      if (aInc !== bInc) return bInc - aInc; // Incoming first
-      return (a.queueNumber ?? 999999) - (b.queueNumber ?? 999999);
-    });
+    if (shouldSortByPriority) {
+      // 2. Sort Team A: incoming first (preserving prior order), then staying (preserving prior order)
+      sortedA.sort((a, b) => {
+        const aInc = isIncoming(a) ? 1 : 0;
+        const bInc = isIncoming(b) ? 1 : 0;
+        if (aInc !== bInc) return bInc - aInc; // Incoming first
+        return (a.queueNumber ?? 999999) - (b.queueNumber ?? 999999);
+      });
+
+      // 3. Sort Team B: incoming first, then staying
+      sortedB.sort((a, b) => {
+        const aInc = isIncoming(a) ? 1 : 0;
+        const bInc = isIncoming(b) ? 1 : 0;
+        if (aInc !== bInc) return bInc - aInc; // Incoming first
+        return (a.queueNumber ?? 999999) - (b.queueNumber ?? 999999);
+      });
+    }
 
     // 4. Assign odd queue numbers to sortedA (Time A)
     const finalA = sortedA.map((p, idx) => ({
@@ -483,10 +489,11 @@ export default function App() {
   const updateTeamsAndQueue = useCallback((
     newTeamA: Player[],
     newTeamB: Player[],
-    newWaitlist: string[]
+    newWaitlist: string[],
+    shouldSortByPriority: boolean = false
   ) => {
     const { teamA: finalA, teamB: finalB, allPlayers: finalAll, nextQueueNumber: finalNext } = 
-      reassignAllQueueNumbers(newTeamA, newTeamB, newWaitlist);
+      reassignAllQueueNumbers(newTeamA, newTeamB, newWaitlist, shouldSortByPriority);
 
     setTeamA(finalA);
     setTeamB(finalB);
@@ -682,7 +689,7 @@ export default function App() {
     setConsecutiveWinsB(0);
     
     // 6. Update teams, reassign queue numbers, and sync
-    updateTeamsAndQueue(mixedA, mixedB, remainingWaitlistIds);
+    updateTeamsAndQueue(mixedA, mixedB, remainingWaitlistIds, true);
     
     syncStateToFirebase({
       consecutiveWinsA: 0,
@@ -770,7 +777,7 @@ export default function App() {
     }
 
     const newWaitlist = waitlist.slice(toAdd.length);
-    updateTeamsAndQueue(newA, newB, newWaitlist);
+    updateTeamsAndQueue(newA, newB, newWaitlist, true);
   }, [teamA, teamB, waitlist, allPlayers, saveHistory, divisionMethod, updateTeamsAndQueue]);
 
   const handleWin = (winner: 'A' | 'B') => {
@@ -798,7 +805,7 @@ export default function App() {
       setConsecutiveWinsA(0);
       setConsecutiveWinsB(0);
       
-      updateTeamsAndQueue(mixedA, mixedB, remainingWaitlistIds);
+      updateTeamsAndQueue(mixedA, mixedB, remainingWaitlistIds, true);
       
       syncStateToFirebase({
         consecutiveWinsA: 0,
@@ -836,7 +843,7 @@ export default function App() {
     setConsecutiveWinsA(finalWinsA);
     setConsecutiveWinsB(finalWinsB);
 
-    updateTeamsAndQueue(newTeamA, newTeamB, finalWaitlist);
+    updateTeamsAndQueue(newTeamA, newTeamB, finalWaitlist, true);
     
     syncStateToFirebase({
       consecutiveWinsA: finalWinsA,
