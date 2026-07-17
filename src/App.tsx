@@ -512,6 +512,26 @@ export default function App() {
     }
   };
 
+  const sortTeamByPriority = useCallback((team: Player[]) => {
+    const winningPlayerIds = new Set(
+      consecutiveWinsA > 0 ? teamA.map(p => p.id) :
+      consecutiveWinsB > 0 ? teamB.map(p => p.id) : []
+    );
+
+    return [...team].sort((a, b) => {
+      const isAWin = winningPlayerIds.has(a.id);
+      const isBWin = winningPlayerIds.has(b.id);
+
+      if (isAWin && !isBWin) return -1;
+      if (!isAWin && isBWin) return 1;
+
+      // Both are winners or both are incoming, preserve their arrival/queueNumber order
+      const qA = a.queueNumber ?? 999999;
+      const qB = b.queueNumber ?? 999999;
+      return qA - qB;
+    });
+  }, [teamA, teamB, consecutiveWinsA, consecutiveWinsB]);
+
   const switchTeam = (id: string) => {
     saveHistory();
     const playerA = teamA.find(p => p.id === id);
@@ -519,13 +539,13 @@ export default function App() {
 
     if (playerA) {
       const newA = teamA.filter(p => p.id !== id);
-      const newB = [...teamB, playerA];
+      const newB = sortTeamByPriority([...teamB, playerA]);
       setTeamA(newA);
       setTeamB(newB);
       syncStateToFirebase({ teamA: newA, teamB: newB });
     } else if (playerB) {
       const newB = teamB.filter(p => p.id !== id);
-      const newA = [...teamA, playerB];
+      const newA = sortTeamByPriority([...teamA, playerB]);
       setTeamB(newB);
       setTeamA(newA);
       syncStateToFirebase({ teamA: newA, teamB: newB });
@@ -577,8 +597,8 @@ export default function App() {
       });
 
       return {
-        teamA: tA.sort((a, b) => (a.queueNumber ?? 0) - (b.queueNumber ?? 0)),
-        teamB: tB.sort((a, b) => (a.queueNumber ?? 0) - (b.queueNumber ?? 0))
+        teamA: sortTeamByPriority(tA),
+        teamB: sortTeamByPriority(tB)
       };
     }
 
@@ -627,8 +647,8 @@ export default function App() {
     });
 
     return { 
-      teamA: tA.sort((a, b) => (a.queueNumber || 0) - (b.queueNumber || 0)), 
-      teamB: tB.sort((a, b) => (a.queueNumber || 0) - (b.queueNumber || 0)) 
+      teamA: sortTeamByPriority(tA), 
+      teamB: sortTeamByPriority(tB) 
     };
   };
 
@@ -736,16 +756,19 @@ export default function App() {
 
     const newWaitlist = waitlist.slice(toAdd.length);
 
-    setTeamA(newA);
-    setTeamB(newB);
+    const sortedA = sortTeamByPriority(newA);
+    const sortedB = sortTeamByPriority(newB);
+
+    setTeamA(sortedA);
+    setTeamB(sortedB);
     setWaitlist(newWaitlist);
 
     syncStateToFirebase({
-      teamA: newA,
-      teamB: newB,
+      teamA: sortedA,
+      teamB: sortedB,
       waitlist: newWaitlist
     });
-  }, [teamA, teamB, waitlist, allPlayers, saveHistory, syncStateToFirebase, divisionMethod]);
+  }, [teamA, teamB, waitlist, allPlayers, saveHistory, syncStateToFirebase, divisionMethod, sortTeamByPriority]);
 
   const handleWin = (winner: 'A' | 'B') => {
     saveHistory();
