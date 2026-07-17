@@ -566,11 +566,8 @@ export default function App() {
         return qA - qB;
       });
 
-      const women = sortedPlayers.filter(p => p.gender === 'M');
-      const men = sortedPlayers.filter(p => p.gender === 'H');
-
-      // Alternate women to ensure perfect gender balance
-      women.forEach((p, index) => {
+      // Strict alternating division (1, 3, 5... to Team A, and 2, 4, 6... to Team B)
+      sortedPlayers.forEach((p, index) => {
         if (index % 2 === 0) {
           tA.push(p);
         } else {
@@ -578,27 +575,9 @@ export default function App() {
         }
       });
 
-      // Alternate men, but offset based on team size to keep them balanced
-      men.forEach((p, index) => {
-        const targetAFirst = tA.length <= tB.length;
-        if (targetAFirst) {
-          if (index % 2 === 0) {
-            tA.push(p);
-          } else {
-            tB.push(p);
-          }
-        } else {
-          if (index % 2 === 0) {
-            tB.push(p);
-          } else {
-            tA.push(p);
-          }
-        }
-      });
-
       return {
-        teamA: sortTeamByPriority(tA),
-        teamB: sortTeamByPriority(tB)
+        teamA: tA.sort((a, b) => (a.queueNumber ?? 999999) - (b.queueNumber ?? 999999)),
+        teamB: tB.sort((a, b) => (a.queueNumber ?? 999999) - (b.queueNumber ?? 999999))
       };
     }
 
@@ -1011,7 +990,7 @@ export default function App() {
                   <p className="text-[11px] text-slate-400 mt-1">
                     {divisionMethod === 'balanced' 
                       ? "Foca no equilíbrio geral balanceando por nível técnico e gênero através de sorteio." 
-                      : "Distribui os jogadores alternadamente pela ordem de chegada/espera (1,3,5... no Time A e 2,4,6... no Time B), respeitando o gênero."
+                      : "Distribui os jogadores alternadamente pela ordem de chegada/espera (1,3,5... no Time A e 2,4,6... no Time B)."
                     }
                   </p>
                 </div>
