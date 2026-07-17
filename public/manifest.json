@@ -1,0 +1,24 @@
+{
+  "name": "Gestor de Vôlei v3.0",
+  "short_name": "Gestor Vôlei",
+  "description": "Gestor de partidas de vôlei, fila de espera e notas de jogadores em tempo real.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#f59e0b",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-512.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "maskable"
+    }
+  ]
+}
