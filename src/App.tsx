@@ -267,28 +267,13 @@ export default function App() {
     if (waitlist.includes(id) || teamA.some(p => p.id === id) || teamB.some(p => p.id === id)) return;
     saveHistory();
     
-    // Assign queue number
-    const updatedPlayers = allPlayers.map(p => 
-      p.id === id ? { ...p, queueNumber: nextQueueNumber } : p
-    );
-    setAllPlayers(updatedPlayers);
-    const newNextQueue = nextQueueNumber + 1;
-    setNextQueueNumber(newNextQueue);
-    
     const newWaitlist = [...waitlist, id];
-    setWaitlist(newWaitlist);
-
-    // Automatically lock players when they enter the waitlist
     const newLocked = new Set(lockedPlayers);
     newLocked.add(id);
     setLockedPlayers(newLocked);
 
-    syncAllPlayersToFirebase(updatedPlayers);
-    syncStateToFirebase({
-      waitlist: newWaitlist,
-      nextQueueNumber: newNextQueue,
-      lockedPlayers: Array.from(newLocked)
-    });
+    updateTeamsAndQueue(teamA, teamB, newWaitlist);
+    syncStateToFirebase({ lockedPlayers: Array.from(newLocked) });
   };
 
   const removePlayerFromGame = (id: string) => {
@@ -298,12 +283,6 @@ export default function App() {
     if (teamA.some(p => p.id === id)) fromTeam = 'A';
     else if (teamB.some(p => p.id === id)) fromTeam = 'B';
 
-    // Clear queue number
-    const updatedPlayers = allPlayers.map(p => 
-      p.id === id ? { ...p, queueNumber: undefined } : p
-    );
-    setAllPlayers(updatedPlayers);
-    
     const newLocked = new Set(lockedPlayers);
     newLocked.delete(id);
     setLockedPlayers(newLocked);
@@ -314,7 +293,7 @@ export default function App() {
 
     if (fromTeam && newWaitlist.length > 0) {
       const nextId = newWaitlist[0];
-      const nextPlayer = updatedPlayers.find(p => p.id === nextId);
+      const nextPlayer = allPlayers.find(p => p.id === nextId);
       if (nextPlayer) {
         if (fromTeam === 'A') newTeamA = [...newTeamA.filter(p => p.id !== id), nextPlayer];
         else newTeamB = [...newTeamB.filter(p => p.id !== id), nextPlayer];
@@ -325,17 +304,8 @@ export default function App() {
       if (fromTeam === 'B') newTeamB = newTeamB.filter(p => p.id !== id);
     }
 
-    setWaitlist(newWaitlist);
-    setTeamA(newTeamA);
-    setTeamB(newTeamB);
-
-    syncAllPlayersToFirebase(updatedPlayers);
-    syncStateToFirebase({
-      waitlist: newWaitlist,
-      teamA: newTeamA,
-      teamB: newTeamB,
-      lockedPlayers: Array.from(newLocked)
-    });
+    updateTeamsAndQueue(newTeamA, newTeamB, newWaitlist);
+    syncStateToFirebase({ lockedPlayers: Array.from(newLocked) });
   };
 
   const registerPlayer = (e: React.FormEvent) => {
@@ -446,29 +416,92 @@ export default function App() {
     syncStateToFirebase({ lockedPlayers: Array.from(next) });
   };
 
-  const updateWaitlistAndSyncNumbers = (newWaitlist: string[]) => {
-    // Get the pool of queue numbers currently in the waitlist
-    const playersInWaitlist = waitlist.map(id => allPlayers.find(p => p.id === id)).filter(Boolean) as Player[];
-    const currentNumbers = playersInWaitlist.map(p => p.queueNumber || 0).sort((a, b) => a - b);
-    
-    // Re-assign these numbers to the players in their new positions
-    const updatedAllPlayers = [...allPlayers];
-    newWaitlist.forEach((id, index) => {
-      const playerIndex = updatedAllPlayers.findIndex(p => p.id === id);
-      if (playerIndex !== -1 && index < currentNumbers.length) {
-        updatedAllPlayers[playerIndex] = {
-          ...updatedAllPlayers[playerIndex],
-          queueNumber: currentNumbers[index]
+  const reassignAllQueueNumbers = useCallback((
+    currentTeamA: Player[],
+    currentTeamB: Player[],
+    currentWaitlist: string[]
+  ) => {
+    // 1. Identify incoming players (those with queueNumber >= 13 or undefined, meaning they just came from waitlist)
+    // and staying players (those with queueNumber < 13)
+    const isIncoming = (p: Player) => p.queueNumber === undefined || p.queueNumber >= 13;
+
+    // 2. Sort Team A: incoming first (preserving prior order), then staying (preserving prior order)
+    const sortedA = [...currentTeamA].sort((a, b) => {
+      const aInc = isIncoming(a) ? 1 : 0;
+      const bInc = isIncoming(b) ? 1 : 0;
+      if (aInc !== bInc) return bInc - aInc; // Incoming first
+      return (a.queueNumber ?? 999999) - (b.queueNumber ?? 999999);
+    });
+
+    // 3. Sort Team B: incoming first, then staying
+    const sortedB = [...currentTeamB].sort((a, b) => {
+      const aInc = isIncoming(a) ? 1 : 0;
+      const bInc = isIncoming(b) ? 1 : 0;
+      if (aInc !== bInc) return bInc - aInc; // Incoming first
+      return (a.queueNumber ?? 999999) - (b.queueNumber ?? 999999);
+    });
+
+    // 4. Assign odd queue numbers to sortedA (Time A)
+    const finalA = sortedA.map((p, idx) => ({
+      ...p,
+      queueNumber: 1 + idx * 2 // 1, 3, 5, 7, 9, 11
+    }));
+
+    // 5. Assign even queue numbers to sortedB (Time B)
+    const finalB = sortedB.map((p, idx) => ({
+      ...p,
+      queueNumber: 2 + idx * 2 // 2, 4, 6, 8, 10, 12
+    }));
+
+    // 6. Update allPlayers with the newly assigned numbers
+    const updatedAllPlayers = allPlayers.map(p => {
+      const inA = finalA.find(x => x.id === p.id);
+      if (inA) return inA;
+
+      const inB = finalB.find(x => x.id === p.id);
+      if (inB) return inB;
+
+      const wlIdx = currentWaitlist.indexOf(p.id);
+      if (wlIdx !== -1) {
+        return {
+          ...p,
+          queueNumber: 13 + wlIdx // 13, 14, 15...
         };
       }
-    });
-    
-    setAllPlayers(updatedAllPlayers);
-    setWaitlist(newWaitlist);
 
-    syncAllPlayersToFirebase(updatedAllPlayers);
-    syncStateToFirebase({ waitlist: newWaitlist });
-  };
+      return { ...p, queueNumber: undefined };
+    });
+
+    return {
+      teamA: finalA,
+      teamB: finalB,
+      allPlayers: updatedAllPlayers,
+      nextQueueNumber: 13 + currentWaitlist.length
+    };
+  }, [allPlayers]);
+
+  const updateTeamsAndQueue = useCallback((
+    newTeamA: Player[],
+    newTeamB: Player[],
+    newWaitlist: string[]
+  ) => {
+    const { teamA: finalA, teamB: finalB, allPlayers: finalAll, nextQueueNumber: finalNext } = 
+      reassignAllQueueNumbers(newTeamA, newTeamB, newWaitlist);
+
+    setTeamA(finalA);
+    setTeamB(finalB);
+    setWaitlist(newWaitlist);
+    setAllPlayers(finalAll);
+    setNextQueueNumber(finalNext);
+
+    syncAllPlayersToFirebase(finalAll);
+    syncStateToFirebase({
+      teamA: finalA,
+      teamB: finalB,
+      waitlist: newWaitlist,
+      nextQueueNumber: finalNext
+    });
+  }, [reassignAllQueueNumbers, syncAllPlayersToFirebase, syncStateToFirebase]);
 
   const moveInWaitlist = (index: number, direction: 'up' | 'down') => {
     saveHistory();
@@ -477,8 +510,16 @@ export default function App() {
     if (targetIndex < 0 || targetIndex >= newWaitlist.length) return;
     
     [newWaitlist[index], newWaitlist[targetIndex]] = [newWaitlist[targetIndex], newWaitlist[index]];
-    updateWaitlistAndSyncNumbers(newWaitlist);
+    updateTeamsAndQueue(teamA, teamB, newWaitlist);
   };
+
+  const sortTeamByPriority = useCallback((team: Player[]) => {
+    return [...team].sort((a, b) => {
+      const qA = a.queueNumber ?? 999999;
+      const qB = b.queueNumber ?? 999999;
+      return qA - qB;
+    });
+  }, []);
 
   const moveInTeam = (team: 'A' | 'B', index: number, direction: 'up' | 'down') => {
     saveHistory();
@@ -491,46 +532,19 @@ export default function App() {
 
     [currentTeam[index], currentTeam[targetIndex]] = [currentTeam[targetIndex], currentTeam[index]];
     if (team === 'A') {
-      setTeamA(currentTeam);
-      syncStateToFirebase({ teamA: currentTeam });
+      updateTeamsAndQueue(currentTeam, teamB, waitlist);
     } else {
-      setTeamB(currentTeam);
-      syncStateToFirebase({ teamB: currentTeam });
+      updateTeamsAndQueue(teamA, currentTeam, waitlist);
     }
   };
 
   const onReorderTeam = (team: 'A' | 'B', newOrder: Player[]) => {
-    // Check if any locked player changed their relative position
-    // This is complex with Reorder.Group, so we'll just allow it for now
-    // but prevent dragging locked players via dragListener
     if (team === 'A') {
-      setTeamA(newOrder);
-      syncStateToFirebase({ teamA: newOrder });
+      updateTeamsAndQueue(newOrder, teamB, waitlist);
     } else {
-      setTeamB(newOrder);
-      syncStateToFirebase({ teamB: newOrder });
+      updateTeamsAndQueue(teamA, newOrder, waitlist);
     }
   };
-
-  const sortTeamByPriority = useCallback((team: Player[]) => {
-    const winningPlayerIds = new Set(
-      consecutiveWinsA > 0 ? teamA.map(p => p.id) :
-      consecutiveWinsB > 0 ? teamB.map(p => p.id) : []
-    );
-
-    return [...team].sort((a, b) => {
-      const isAWin = winningPlayerIds.has(a.id);
-      const isBWin = winningPlayerIds.has(b.id);
-
-      if (isAWin && !isBWin) return -1;
-      if (!isAWin && isBWin) return 1;
-
-      // Both are winners or both are incoming, preserve their arrival/queueNumber order
-      const qA = a.queueNumber ?? 999999;
-      const qB = b.queueNumber ?? 999999;
-      return qA - qB;
-    });
-  }, [teamA, teamB, consecutiveWinsA, consecutiveWinsB]);
 
   const switchTeam = (id: string) => {
     saveHistory();
@@ -538,17 +552,13 @@ export default function App() {
     const playerB = teamB.find(p => p.id === id);
 
     if (playerA) {
-      const newA = sortTeamByPriority(teamA.filter(p => p.id !== id));
-      const newB = sortTeamByPriority([...teamB, playerA]);
-      setTeamA(newA);
-      setTeamB(newB);
-      syncStateToFirebase({ teamA: newA, teamB: newB });
+      const newA = teamA.filter(p => p.id !== id);
+      const newB = [...teamB, playerA];
+      updateTeamsAndQueue(newA, newB, waitlist);
     } else if (playerB) {
-      const newB = sortTeamByPriority(teamB.filter(p => p.id !== id));
-      const newA = sortTeamByPriority([...teamA, playerB]);
-      setTeamB(newB);
-      setTeamA(newA);
-      syncStateToFirebase({ teamA: newA, teamB: newB });
+      const newB = teamB.filter(p => p.id !== id);
+      const newA = [...teamA, playerB];
+      updateTeamsAndQueue(newA, newB, waitlist);
     }
   };
 
@@ -648,13 +658,13 @@ export default function App() {
     if (onCourt.length === 0) return;
     saveHistory();
     const { teamA: newA, teamB: newB } = balanceTeams(onCourt);
-    setTeamA(newA);
-    setTeamB(newB);
+    
+    // Clear consecutive wins
     setConsecutiveWinsA(0);
     setConsecutiveWinsB(0);
+    
+    updateTeamsAndQueue(newA, newB, waitlist);
     syncStateToFirebase({
-      teamA: newA,
-      teamB: newB,
       consecutiveWinsA: 0,
       consecutiveWinsB: 0
     });
@@ -678,8 +688,6 @@ export default function App() {
     const newB = [...teamB];
 
     if (divisionMethod === 'alternating') {
-      // Alternate adding players from the waitlist to the teams that need them, 
-      // keeping the teams balanced.
       let turnToA = newA.length <= newB.length;
       toAdd.forEach(player => {
         if (newA.length < 6 && (newB.length === 6 || turnToA)) {
@@ -694,14 +702,10 @@ export default function App() {
         }
       });
     } else {
-      // Balanced mode distribution of incoming players from the waitlist:
-      // Sort incoming players by rating descending
       const sortedToAdd = [...toAdd].sort((a, b) => b.rating - a.rating);
-      
       const getTeamRatingSum = (team: Player[]) => team.reduce((sum, p) => sum + p.rating, 0);
       const getTeamGenderCount = (team: Player[], g: Gender) => team.filter(p => p.gender === g).length;
 
-      // Distribute sortedToAdd one by one to keep the resulting teams balanced by rating and gender
       sortedToAdd.forEach(p => {
         const canGoToA = newA.length < 6;
         const canGoToB = newB.length < 6;
@@ -746,20 +750,8 @@ export default function App() {
     }
 
     const newWaitlist = waitlist.slice(toAdd.length);
-
-    const sortedA = sortTeamByPriority(newA);
-    const sortedB = sortTeamByPriority(newB);
-
-    setTeamA(sortedA);
-    setTeamB(sortedB);
-    setWaitlist(newWaitlist);
-
-    syncStateToFirebase({
-      teamA: sortedA,
-      teamB: sortedB,
-      waitlist: newWaitlist
-    });
-  }, [teamA, teamB, waitlist, allPlayers, saveHistory, syncStateToFirebase, divisionMethod, sortTeamByPriority]);
+    updateTeamsAndQueue(newA, newB, newWaitlist);
+  }, [teamA, teamB, waitlist, allPlayers, saveHistory, divisionMethod, updateTeamsAndQueue]);
 
   const handleWin = (winner: 'A' | 'B') => {
     saveHistory();
@@ -784,89 +776,21 @@ export default function App() {
     const remainingWaitlistIds = waitlist.slice(numFromWaitlist);
     const remainingWaitlist = remainingWaitlistIds.map(id => allPlayers.find(p => p.id === id)!).filter(Boolean);
 
-    // RESET AND RE-ASSIGN ALL QUEUE NUMBERS SEQUENTIALLY:
-    // This establishes a clean, foolproof sorting order:
-    // 1. Winners (1 to 6)
-    // 2. Waitlist entrants entering court (7 to 6 + numFromWaitlist)
-    // 3. Losers staying on court
-    // 4. Remaining waitlist players
-    // 5. Losers going back to waitlist (at the very end)
-    let currentNext = 1;
+    const newChallengerTeam = [...playersFromWaitlist, ...playersFromLosers];
+
+    let newTeamA = winner === 'A' ? winningTeam : newChallengerTeam;
+    let newTeamB = winner === 'B' ? winningTeam : newChallengerTeam;
     
-    const winnersWithNewNumbers = winningTeam.map(p => {
-      const updated = { ...p, queueNumber: currentNext };
-      currentNext++;
-      return updated;
-    });
-
-    const waitlistEntrantsWithNewNumbers = playersFromWaitlist.map(p => {
-      const updated = { ...p, queueNumber: currentNext };
-      currentNext++;
-      return updated;
-    });
-
-    const losersStayingWithNewNumbers = playersFromLosers.map(p => {
-      const updated = { ...p, queueNumber: currentNext };
-      currentNext++;
-      return updated;
-    });
-
-    const remainingWaitlistWithNewNumbers = remainingWaitlist.map(p => {
-      const updated = { ...p, queueNumber: currentNext };
-      currentNext++;
-      return updated;
-    });
-
-    const losersGoingWithNewNumbers = remainingLosers.map(p => {
-      const updated = { ...p, queueNumber: currentNext };
-      currentNext++;
-      return updated;
-    });
-
-    // Update allPlayers with the newly sequential queue numbers for all active categories
-    const updatedAllPlayers = allPlayers.map(p => {
-      const updatedWinner = winnersWithNewNumbers.find(w => w.id === p.id);
-      if (updatedWinner) return updatedWinner;
-
-      const updatedEntrant = waitlistEntrantsWithNewNumbers.find(e => e.id === p.id);
-      if (updatedEntrant) return updatedEntrant;
-
-      const updatedStaying = losersStayingWithNewNumbers.find(l => l.id === p.id);
-      if (updatedStaying) return updatedStaying;
-
-      const updatedRemainingWl = remainingWaitlistWithNewNumbers.find(rw => rw.id === p.id);
-      if (updatedRemainingWl) return updatedRemainingWl;
-
-      const updatedGoing = losersGoingWithNewNumbers.find(l => l.id === p.id);
-      if (updatedGoing) return updatedGoing;
-
-      return p;
-    });
-
-    const newChallengerTeam = sortTeamByPriority([...waitlistEntrantsWithNewNumbers, ...losersStayingWithNewNumbers]);
-
-    let newTeamA = winner === 'A' ? sortTeamByPriority(winnersWithNewNumbers) : newChallengerTeam;
-    let newTeamB = winner === 'B' ? sortTeamByPriority(winnersWithNewNumbers) : newChallengerTeam;
-    
-    // New waitlist: remaining waitlist + remaining losers (with updated IDs)
-    const newWaitlist = [...remainingWaitlistWithNewNumbers.map(p => p.id), ...losersGoingWithNewNumbers.map(p => p.id)];
+    const newWaitlist = [...remainingWaitlist.map(p => p.id), ...remainingLosers.map(p => p.id)];
 
     setConsecutiveWinsA(finalWinsA);
     setConsecutiveWinsB(finalWinsB);
-    setTeamA(newTeamA);
-    setTeamB(newTeamB);
-    setWaitlist(newWaitlist);
-    setAllPlayers(updatedAllPlayers);
-    setNextQueueNumber(currentNext);
 
-    syncAllPlayersToFirebase(updatedAllPlayers);
+    updateTeamsAndQueue(newTeamA, newTeamB, newWaitlist);
+    
     syncStateToFirebase({
-      teamA: newTeamA,
-      teamB: newTeamB,
-      waitlist: newWaitlist,
       consecutiveWinsA: finalWinsA,
-      consecutiveWinsB: finalWinsB,
-      nextQueueNumber: currentNext
+      consecutiveWinsB: finalWinsB
     });
   };
 
@@ -1373,7 +1297,7 @@ export default function App() {
                     </button>
                   </div>
                 </div>
-                <Reorder.Group axis="y" values={waitlist} onReorder={updateWaitlistAndSyncNumbers} className="space-y-2">
+                <Reorder.Group axis="y" values={waitlist} onReorder={(newOrder) => updateTeamsAndQueue(teamA, teamB, newOrder)} className="space-y-2">
                   {waitlist.length === 0 ? (
                     <p className="text-slate-600 text-center py-12 text-sm italic">Ninguém na espera</p>
                   ) : (
