@@ -839,6 +839,17 @@ export default function App() {
     !teamB.some(tp => tp.id === p.id)
   );
 
+  const getTeamAverage = (team: Player[]) => {
+    if (team.length === 0) return 0;
+    const ratedPlayers = team.filter(p => p.rating !== undefined);
+    if (ratedPlayers.length === 0) return 0;
+    const sum = ratedPlayers.reduce((acc, p) => acc + (p.rating ?? 0), 0);
+    return sum / ratedPlayers.length;
+  };
+
+  const avgRatingA = getTeamAverage(teamA);
+  const avgRatingB = getTeamAverage(teamB);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-20">
       {/* Header */}
@@ -1054,8 +1065,14 @@ export default function App() {
                     <div>
                       <h3 className="font-bold">Time A</h3>
                       {teamA.length > 0 && (
-                        <p className="text-[10px] text-slate-900 font-bold opacity-80">
-                          {teamA.filter(p => p.gender === 'M').length} ♀ • {teamA.filter(p => p.gender === 'H').length} ♂
+                        <p className="text-[10px] text-slate-900 font-bold opacity-80 flex items-center gap-1.5 flex-wrap">
+                          <span>{teamA.filter(p => p.gender === 'M').length} ♀ • {teamA.filter(p => p.gender === 'H').length} ♂</span>
+                          {showRatings && (
+                            <>
+                              <span>•</span>
+                              <span className="bg-amber-600/20 px-1 rounded">★ {avgRatingA.toFixed(2)} Média</span>
+                            </>
+                          )}
                         </p>
                       )}
                     </div>
@@ -1151,8 +1168,14 @@ export default function App() {
                     <div>
                       <h3 className="font-bold">Time B</h3>
                       {teamB.length > 0 && (
-                        <p className="text-[10px] text-slate-500 font-bold opacity-80">
-                          {teamB.filter(p => p.gender === 'M').length} ♀ • {teamB.filter(p => p.gender === 'H').length} ♂
+                        <p className="text-[10px] text-slate-500 font-bold opacity-80 flex items-center gap-1.5 flex-wrap">
+                          <span>{teamB.filter(p => p.gender === 'M').length} ♀ • {teamB.filter(p => p.gender === 'H').length} ♂</span>
+                          {showRatings && (
+                            <>
+                              <span>•</span>
+                              <span className="bg-slate-100 px-1 rounded">★ {avgRatingB.toFixed(2)} Média</span>
+                            </>
+                          )}
                         </p>
                       )}
                     </div>
