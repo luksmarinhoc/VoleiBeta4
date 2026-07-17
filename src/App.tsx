@@ -784,35 +784,72 @@ export default function App() {
     const remainingWaitlistIds = waitlist.slice(numFromWaitlist);
     const remainingWaitlist = remainingWaitlistIds.map(id => allPlayers.find(p => p.id === id)!).filter(Boolean);
 
-    // Keep original queue numbers for players staying on court or remaining in waitlist.
-    // ONLY assign new, incremented queue numbers to losers who are returning to the waitlist (losing team players who don't stay on court).
-    let currentNext = nextQueueNumber;
+    // RESET AND RE-ASSIGN ALL QUEUE NUMBERS SEQUENTIALLY:
+    // This establishes a clean, foolproof sorting order:
+    // 1. Winners (1 to 6)
+    // 2. Waitlist entrants entering court (7 to 6 + numFromWaitlist)
+    // 3. Losers staying on court
+    // 4. Remaining waitlist players
+    // 5. Losers going back to waitlist (at the very end)
+    let currentNext = 1;
     
+    const winnersWithNewNumbers = winningTeam.map(p => {
+      const updated = { ...p, queueNumber: currentNext };
+      currentNext++;
+      return updated;
+    });
+
+    const waitlistEntrantsWithNewNumbers = playersFromWaitlist.map(p => {
+      const updated = { ...p, queueNumber: currentNext };
+      currentNext++;
+      return updated;
+    });
+
+    const losersStayingWithNewNumbers = playersFromLosers.map(p => {
+      const updated = { ...p, queueNumber: currentNext };
+      currentNext++;
+      return updated;
+    });
+
+    const remainingWaitlistWithNewNumbers = remainingWaitlist.map(p => {
+      const updated = { ...p, queueNumber: currentNext };
+      currentNext++;
+      return updated;
+    });
+
     const losersGoingWithNewNumbers = remainingLosers.map(p => {
       const updated = { ...p, queueNumber: currentNext };
       currentNext++;
       return updated;
     });
 
-    // Update allPlayers with the newly sequential queue numbers ONLY for the losers returning to waitlist.
+    // Update allPlayers with the newly sequential queue numbers for all active categories
     const updatedAllPlayers = allPlayers.map(p => {
+      const updatedWinner = winnersWithNewNumbers.find(w => w.id === p.id);
+      if (updatedWinner) return updatedWinner;
+
+      const updatedEntrant = waitlistEntrantsWithNewNumbers.find(e => e.id === p.id);
+      if (updatedEntrant) return updatedEntrant;
+
+      const updatedStaying = losersStayingWithNewNumbers.find(l => l.id === p.id);
+      if (updatedStaying) return updatedStaying;
+
+      const updatedRemainingWl = remainingWaitlistWithNewNumbers.find(rw => rw.id === p.id);
+      if (updatedRemainingWl) return updatedRemainingWl;
+
       const updatedGoing = losersGoingWithNewNumbers.find(l => l.id === p.id);
       if (updatedGoing) return updatedGoing;
+
       return p;
     });
 
-    // Winners of the previous match keep their original queue numbers
-    const winnersWithOriginalNumbers = winningTeam;
+    const newChallengerTeam = sortTeamByPriority([...waitlistEntrantsWithNewNumbers, ...losersStayingWithNewNumbers]);
 
-    // Challenger team combines waitlist entrants and staying losers (keeping their original queue numbers)
-    // and is sorted by priority/queueNumber
-    const newChallengerTeam = sortTeamByPriority([...playersFromWaitlist, ...playersFromLosers]);
-
-    let newTeamA = winner === 'A' ? sortTeamByPriority(winnersWithOriginalNumbers) : newChallengerTeam;
-    let newTeamB = winner === 'B' ? sortTeamByPriority(winnersWithOriginalNumbers) : newChallengerTeam;
+    let newTeamA = winner === 'A' ? sortTeamByPriority(winnersWithNewNumbers) : newChallengerTeam;
+    let newTeamB = winner === 'B' ? sortTeamByPriority(winnersWithNewNumbers) : newChallengerTeam;
     
     // New waitlist: remaining waitlist + remaining losers (with updated IDs)
-    const newWaitlist = [...remainingWaitlist.map(p => p.id), ...losersGoingWithNewNumbers.map(p => p.id)];
+    const newWaitlist = [...remainingWaitlistWithNewNumbers.map(p => p.id), ...losersGoingWithNewNumbers.map(p => p.id)];
 
     setConsecutiveWinsA(finalWinsA);
     setConsecutiveWinsB(finalWinsB);
