@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Player, Gender, HistoryEntry } from './types';
 import { INITIAL_PLAYERS } from './constants';
 import { db, auth } from './firebase';
@@ -54,6 +54,36 @@ export default function App() {
   const [lockedPlayers, setLockedPlayers] = useState<Set<string>>(new Set());
   const [nextQueueNumber, setNextQueueNumber] = useState(1);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [showRatings, setShowRatings] = useState(true);
+  const [divisionMethod, setDivisionMethod] = useState<'balanced' | 'alternating'>('balanced');
+
+  const latestStateRef = useRef({
+    teamA,
+    teamB,
+    waitlist,
+    allPlayers,
+    nextQueueNumber,
+    lockedPlayers,
+    consecutiveWinsA,
+    consecutiveWinsB,
+    showRatings,
+    divisionMethod,
+  });
+
+  useEffect(() => {
+    latestStateRef.current = {
+      teamA,
+      teamB,
+      waitlist,
+      allPlayers,
+      nextQueueNumber,
+      lockedPlayers,
+      consecutiveWinsA,
+      consecutiveWinsB,
+      showRatings,
+      divisionMethod,
+    };
+  }, [teamA, teamB, waitlist, allPlayers, nextQueueNumber, lockedPlayers, consecutiveWinsA, consecutiveWinsB, showRatings, divisionMethod]);
 
   const womenCountA = useMemo(() => teamA.filter(p => p.gender === 'M').length, [teamA]);
   const womenCountB = useMemo(() => teamB.filter(p => p.gender === 'M').length, [teamB]);
@@ -119,9 +149,6 @@ export default function App() {
     });
     return () => unsubscribe();
   }, [isAuthReady]);
-
-  const [showRatings, setShowRatings] = useState(true);
-  const [divisionMethod, setDivisionMethod] = useState<'balanced' | 'alternating'>('balanced');
 
   // Sync State from Firestore
   useEffect(() => {
@@ -485,6 +512,71 @@ export default function App() {
       nextQueueNumber: 13 + currentWaitlist.length
     };
   }, [allPlayers]);
+
+  const updateTeamsAndQueueLocal = useCallback((
+    newTeamA: Player[],
+    newTeamB: Player[],
+    newWaitlist: string[],
+    shouldSortByPriority: boolean = false
+  ) => {
+    const { teamA: finalA, teamB: finalB, allPlayers: finalAll, nextQueueNumber: finalNext } = 
+      reassignAllQueueNumbers(newTeamA, newTeamB, newWaitlist, shouldSortByPriority);
+
+    setTeamA(finalA);
+    setTeamB(finalB);
+    setWaitlist(newWaitlist);
+    setAllPlayers(finalAll);
+    setNextQueueNumber(finalNext);
+  }, [reassignAllQueueNumbers]);
+
+  const onReorderTeamLocal = (team: 'A' | 'B', newOrder: Player[]) => {
+    if (team === 'A') {
+      updateTeamsAndQueueLocal(newOrder, teamB, waitlist);
+    } else {
+      updateTeamsAndQueueLocal(teamA, newOrder, waitlist);
+    }
+  };
+
+  const syncCurrentStateToFirebase = useCallback(async () => {
+    if (!isAuthReady) return;
+    try {
+      const {
+        teamA: tA,
+        teamB: tB,
+        waitlist: wl,
+        allPlayers: ap,
+        nextQueueNumber: nq,
+        lockedPlayers: lp,
+        showRatings: sr,
+        divisionMethod: dm,
+        consecutiveWinsA: cwA,
+        consecutiveWinsB: cwB
+      } = latestStateRef.current;
+
+      const batch = writeBatch(db);
+      ap.forEach(p => {
+        const cleanPlayer = JSON.parse(JSON.stringify(p));
+        batch.set(doc(db, 'players', p.id), cleanPlayer);
+      });
+      await batch.commit();
+
+      const cleanData = (obj: any) => JSON.parse(JSON.stringify(obj));
+      const stateData = cleanData({
+        waitlist: wl,
+        teamA: tA,
+        teamB: tB,
+        consecutiveWinsA: cwA,
+        consecutiveWinsB: cwB,
+        nextQueueNumber: nq,
+        lockedPlayers: Array.from(lp),
+        showRatings: sr,
+        divisionMethod: dm
+      });
+      await setDoc(doc(db, 'state', 'current'), stateData, { merge: true });
+    } catch (e) {
+      console.error("Error syncing current state to Firebase:", e);
+    }
+  }, [isAuthReady]);
 
   const updateTeamsAndQueue = useCallback((
     newTeamA: Player[],
@@ -1118,13 +1210,16 @@ export default function App() {
                     {teamA.length === 0 ? (
                       <p className="text-slate-600 text-center py-8 text-sm italic">Vazio</p>
                     ) : (
-                      <Reorder.Group axis="y" values={teamA} onReorder={(newOrder) => onReorderTeam('A', newOrder)} className="space-y-2">
+                      <Reorder.Group axis="y" values={teamA} onReorder={(newOrder) => onReorderTeamLocal('A', newOrder)} className="space-y-2">
                         {teamA.map((p, index) => (
                           <Reorder.Item 
                             key={p.id} 
                             value={p}
                             dragListener={!lockedPlayers.has(p.id)}
-                            onDragEnd={() => saveHistory()}
+                            onDragEnd={() => {
+                              saveHistory();
+                              syncCurrentStateToFirebase();
+                            }}
                             className="flex items-center justify-between p-2 rounded-lg bg-slate-800/50 border border-slate-800 group"
                           >
                             <div className="flex items-center gap-3">
@@ -1227,13 +1322,16 @@ export default function App() {
                     {teamB.length === 0 ? (
                       <p className="text-slate-600 text-center py-8 text-sm italic">Vazio</p>
                     ) : (
-                      <Reorder.Group axis="y" values={teamB} onReorder={(newOrder) => onReorderTeam('B', newOrder)} className="space-y-2">
+                      <Reorder.Group axis="y" values={teamB} onReorder={(newOrder) => onReorderTeamLocal('B', newOrder)} className="space-y-2">
                         {teamB.map((p, index) => (
                           <Reorder.Item 
                             key={p.id} 
                             value={p}
                             dragListener={!lockedPlayers.has(p.id)}
-                            onDragEnd={() => saveHistory()}
+                            onDragEnd={() => {
+                              saveHistory();
+                              syncCurrentStateToFirebase();
+                            }}
                             className="flex items-center justify-between p-2 rounded-lg bg-slate-800/50 border border-slate-800 group"
                           >
                             <div className="flex items-center gap-3">
@@ -1354,7 +1452,7 @@ export default function App() {
                     </button>
                   </div>
                 </div>
-                <Reorder.Group axis="y" values={waitlist} onReorder={(newOrder) => updateTeamsAndQueue(teamA, teamB, newOrder)} className="space-y-2">
+                <Reorder.Group axis="y" values={waitlist} onReorder={(newOrder) => updateTeamsAndQueueLocal(teamA, teamB, newOrder)} className="space-y-2">
                   {waitlist.length === 0 ? (
                     <p className="text-slate-600 text-center py-12 text-sm italic">Ninguém na espera</p>
                   ) : (
@@ -1366,7 +1464,10 @@ export default function App() {
                           key={p.id} 
                           value={p.id}
                           dragListener={!lockedPlayers.has(p.id)}
-                          onDragEnd={() => saveHistory()}
+                          onDragEnd={() => {
+                            saveHistory();
+                            syncCurrentStateToFirebase();
+                          }}
                           className="flex items-center justify-between p-3 rounded-xl bg-slate-800/50 border border-slate-800 cursor-grab active:cursor-grabbing hover:border-amber-500/30 transition-colors group"
                         >
                           <div className="flex items-center gap-3">
