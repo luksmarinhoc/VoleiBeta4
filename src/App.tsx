@@ -137,20 +137,11 @@ export default function App() {
   const syncStateToFirebase = useCallback(async (updates: any) => {
     if (!isAuthReady) return;
     try {
-      await setDoc(doc(db, 'state', 'current'), {
-        waitlist,
-        teamA,
-        teamB,
-        consecutiveWinsA,
-        consecutiveWinsB,
-        nextQueueNumber,
-        lockedPlayers: Array.from(lockedPlayers),
-        ...updates
-      }, { merge: true });
+      await setDoc(doc(db, 'state', 'current'), updates, { merge: true });
     } catch (e) {
       console.error("Error syncing state:", e);
     }
-  }, [isAuthReady, waitlist, teamA, teamB, consecutiveWinsA, consecutiveWinsB, nextQueueNumber, lockedPlayers]);
+  }, [isAuthReady]);
 
   const syncPlayerToFirebase = async (player: Player) => {
     if (!isAuthReady) return;
@@ -352,23 +343,29 @@ export default function App() {
 
     const updatedPlayer = { ...allPlayers.find(p => p.id === id)!, name: editName, rating: validatedRating, gender: editGender };
     
+    const newTeamA = teamA.map(p => p.id === id ? updatedPlayer : p);
+    const newTeamB = teamB.map(p => p.id === id ? updatedPlayer : p);
+
     setAllPlayers(prev => prev.map(p => p.id === id ? updatedPlayer : p));
-    setTeamA(prev => prev.map(p => p.id === id ? updatedPlayer : p));
-    setTeamB(prev => prev.map(p => p.id === id ? updatedPlayer : p));
+    setTeamA(newTeamA);
+    setTeamB(newTeamB);
     setEditingPlayerId(null);
 
     syncPlayerToFirebase(updatedPlayer);
-    syncStateToFirebase({}); // Trigger state sync to update teams in Firestore
+    syncStateToFirebase({ teamA: newTeamA, teamB: newTeamB });
   };
 
   const updatePlayerRating = (id: string, newRating: number) => {
     const updatedPlayer = { ...allPlayers.find(p => p.id === id)!, rating: newRating };
+    const newTeamA = teamA.map(p => p.id === id ? updatedPlayer : p);
+    const newTeamB = teamB.map(p => p.id === id ? updatedPlayer : p);
+
     setAllPlayers(prev => prev.map(p => p.id === id ? updatedPlayer : p));
-    setTeamA(prev => prev.map(p => p.id === id ? updatedPlayer : p));
-    setTeamB(prev => prev.map(p => p.id === id ? updatedPlayer : p));
+    setTeamA(newTeamA);
+    setTeamB(newTeamB);
     
     syncPlayerToFirebase(updatedPlayer);
-    syncStateToFirebase({});
+    syncStateToFirebase({ teamA: newTeamA, teamB: newTeamB });
   };
 
   const deletePlayer = async (id: string) => {
@@ -784,20 +781,20 @@ export default function App() {
                 <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden">
                   <div className="bg-amber-500 p-4 text-slate-950 flex justify-between items-center">
                     <div>
-                      <h3 className="font-bold flex items-center gap-1.5">
+                      <h3 className="font-bold flex items-center gap-1.5 flex-wrap">
                         <span>Time A</span>
-                        <span className="text-xs bg-slate-950/15 text-slate-900 px-2 py-0.5 rounded-full font-extrabold" title="Nota geral média do time">
-                          ★ {teamA.length > 0 ? (teamAScore / teamA.length).toFixed(1) : "0.0"}
+                        <span className="text-xs bg-slate-950/15 text-slate-900 px-2 py-0.5 rounded-full font-extrabold" title="Nota média do time">
+                          Média: {teamA.length > 0 ? (teamAScore / teamA.length).toFixed(1) : "0.0"}
+                        </span>
+                        <span className="text-[10px] bg-slate-950/10 text-slate-850 px-2 py-0.5 rounded-full font-semibold" title="Soma total das notas">
+                          Total: {teamAScore.toFixed(1)}
                         </span>
                       </h3>
-                      {showRatings && (
-                        <div className="flex items-center gap-2">
-                          <p className="text-amber-900 text-xs font-medium">Soma: {teamAScore.toFixed(2)}</p>
-                          {imbalance > 0 && (
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${imbalance > 0.15 ? 'bg-rose-500/20 text-rose-900' : 'bg-amber-600/20 text-amber-900'}`}>
-                              Δ {(imbalance * 100).toFixed(0)}%
-                            </span>
-                          )}
+                      {showRatings && imbalance > 0 && (
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${imbalance > 0.15 ? 'bg-rose-500/20 text-rose-900' : 'bg-amber-600/20 text-amber-900'}`}>
+                            Diferença: {(imbalance * 100).toFixed(0)}%
+                          </span>
                         </div>
                       )}
                     </div>
@@ -900,20 +897,20 @@ export default function App() {
                 <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden">
                   <div className="bg-white p-4 text-slate-950 flex justify-between items-center">
                     <div>
-                      <h3 className="font-bold flex items-center gap-1.5">
+                      <h3 className="font-bold flex items-center gap-1.5 flex-wrap">
                         <span>Time B</span>
-                        <span className="text-xs bg-slate-950/10 text-slate-800 px-2 py-0.5 rounded-full font-extrabold" title="Nota geral média do time">
-                          ★ {teamB.length > 0 ? (teamBScore / teamB.length).toFixed(1) : "0.0"}
+                        <span className="text-xs bg-slate-950/10 text-slate-800 px-2 py-0.5 rounded-full font-extrabold" title="Nota média do time">
+                          Média: {teamB.length > 0 ? (teamBScore / teamB.length).toFixed(1) : "0.0"}
+                        </span>
+                        <span className="text-[10px] bg-slate-950/5 text-slate-600 px-2 py-0.5 rounded-full font-semibold" title="Soma total das notas">
+                          Total: {teamBScore.toFixed(1)}
                         </span>
                       </h3>
-                      {showRatings && (
-                        <div className="flex items-center gap-2">
-                          <p className="text-slate-500 text-xs font-medium">Soma: {teamBScore.toFixed(2)}</p>
-                          {imbalance > 0 && (
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${imbalance > 0.15 ? 'bg-rose-500/20 text-rose-600' : 'bg-slate-200 text-slate-500'}`}>
-                              Δ {(imbalance * 100).toFixed(0)}%
-                            </span>
-                          )}
+                      {showRatings && imbalance > 0 && (
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${imbalance > 0.15 ? 'bg-rose-500/20 text-rose-600' : 'bg-slate-200 text-slate-500'}`}>
+                            Diferença: {(imbalance * 100).toFixed(0)}%
+                          </span>
                         </div>
                       )}
                     </div>
