@@ -491,48 +491,59 @@ export default function App() {
     }
   };
 
-  const balanceTeams = (players: Player[]) => {
+  const balanceTeams = useCallback((players: Player[]) => {
     if (players.length === 0) return { teamA: [], teamB: [] };
 
-    const half = Math.ceil(players.length / 2);
-    
-    // Shuffle players first to ensure different results on each mix
+    // Shuffle players first to ensure different results on each mix for identical ratings
     const shuffled = [...players].sort(() => Math.random() - 0.5);
     
-    const women = shuffled.filter(p => p.gender === 'M');
-    const men = shuffled.filter(p => p.gender === 'H');
+    const women = shuffled.filter(p => p.gender === 'M').sort((a, b) => b.rating - a.rating);
+    const men = shuffled.filter(p => p.gender === 'H').sort((a, b) => b.rating - a.rating);
 
     const tA: Player[] = [];
     const tB: Player[] = [];
 
-    // Distribute women first to ensure gender balance
-    women.forEach((p) => {
-      if (tA.length < half && (tB.length === half || tA.length <= tB.length)) {
-        tA.push(p);
-      } else if (tB.length < half) {
-        tB.push(p);
-      } else {
-        tA.push(p);
-      }
-    });
+    const totalCount = players.length;
+    const half = Math.ceil(totalCount / 2);
 
-    // Distribute men to balance ratings
-    men.forEach(p => {
-      const sumA = tA.reduce((acc, curr) => acc + curr.rating, 0);
-      const sumB = tB.reduce((acc, curr) => acc + curr.rating, 0);
+    const distributeGroup = (group: Player[]) => {
+      group.forEach((p) => {
+        const sumA = tA.reduce((acc, curr) => acc + curr.rating, 0);
+        const sumB = tB.reduce((acc, curr) => acc + curr.rating, 0);
 
-      if (tA.length < half && (tB.length === half || sumA <= sumB)) {
-        tA.push(p);
-      } else {
-        tB.push(p);
-      }
-    });
+        const canAddToA = tA.length < half;
+        const canAddToB = tB.length < half;
+
+        if (canAddToA && canAddToB) {
+          if (sumA < sumB) {
+            tA.push(p);
+          } else if (sumB < sumA) {
+            tB.push(p);
+          } else {
+            // Equal sums, put in the team with fewer players
+            if (tA.length <= tB.length) {
+              tA.push(p);
+            } else {
+              tB.push(p);
+            }
+          }
+        } else if (canAddToA) {
+          tA.push(p);
+        } else if (canAddToB) {
+          tB.push(p);
+        }
+      });
+    };
+
+    // Interleave/distribute women first to ensure perfect gender balance, then men
+    distributeGroup(women);
+    distributeGroup(men);
 
     return { 
       teamA: tA.sort((a, b) => (a.queueNumber || 0) - (b.queueNumber || 0)), 
       teamB: tB.sort((a, b) => (a.queueNumber || 0) - (b.queueNumber || 0)) 
     };
-  };
+  }, []);
 
   const mixTeams = () => {
     const onCourt = [...teamA, ...teamB];
@@ -565,11 +576,9 @@ export default function App() {
 
     saveHistory();
     
-    const playersForA = toAdd.slice(0, neededA);
-    const playersForB = toAdd.slice(neededA);
-
-    const newA = [...teamA, ...playersForA];
-    const newB = [...teamB, ...playersForB];
+    // Combine existing players with new players and run interleaved balancing
+    const pool = [...teamA, ...teamB, ...toAdd];
+    const { teamA: newA, teamB: newB } = balanceTeams(pool);
     const newWaitlist = waitlist.slice(toAdd.length);
 
     setTeamA(newA);
@@ -581,7 +590,7 @@ export default function App() {
       teamB: newB,
       waitlist: newWaitlist
     });
-  }, [teamA, teamB, waitlist, allPlayers, saveHistory, syncStateToFirebase]);
+  }, [teamA, teamB, waitlist, allPlayers, saveHistory, syncStateToFirebase, balanceTeams]);
 
   const handleWin = (winner: 'A' | 'B') => {
     saveHistory();
@@ -805,7 +814,12 @@ export default function App() {
                 <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden">
                   <div className="bg-amber-500 p-4 text-slate-950 flex justify-between items-center">
                     <div>
-                      <h3 className="font-bold">Time A</h3>
+                      <h3 className="font-bold flex items-center gap-1.5">
+                        <span>Time A</span>
+                        <span className="text-xs bg-slate-950/15 text-slate-900 px-2 py-0.5 rounded-full font-extrabold" title="Nota geral média do time">
+                          ★ {teamA.length > 0 ? (teamAScore / teamA.length).toFixed(1) : "0.0"}
+                        </span>
+                      </h3>
                       {showRatings && (
                         <div className="flex items-center gap-2">
                           <p className="text-amber-900 text-xs font-medium">Soma: {teamAScore.toFixed(2)}</p>
@@ -916,7 +930,12 @@ export default function App() {
                 <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden">
                   <div className="bg-white p-4 text-slate-950 flex justify-between items-center">
                     <div>
-                      <h3 className="font-bold">Time B</h3>
+                      <h3 className="font-bold flex items-center gap-1.5">
+                        <span>Time B</span>
+                        <span className="text-xs bg-slate-950/10 text-slate-800 px-2 py-0.5 rounded-full font-extrabold" title="Nota geral média do time">
+                          ★ {teamB.length > 0 ? (teamBScore / teamB.length).toFixed(1) : "0.0"}
+                        </span>
+                      </h3>
                       {showRatings && (
                         <div className="flex items-center gap-2">
                           <p className="text-slate-500 text-xs font-medium">Soma: {teamBScore.toFixed(2)}</p>
