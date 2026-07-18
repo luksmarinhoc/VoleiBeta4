@@ -133,6 +133,37 @@ export default function App() {
     return () => unsubscribe();
   }, [isAuthReady]);
 
+  // Keep teamA and teamB in sync with the latest player details from allPlayers
+  useEffect(() => {
+    if (allPlayers.length === 0) return;
+    
+    setTeamA(prev => {
+      let changed = false;
+      const next = prev.map(tp => {
+        const fresh = allPlayers.find(p => p.id === tp.id);
+        if (fresh && (fresh.name !== tp.name || fresh.rating !== tp.rating || fresh.gender !== tp.gender || fresh.queueNumber !== tp.queueNumber)) {
+          changed = true;
+          return { ...tp, ...fresh };
+        }
+        return tp;
+      });
+      return changed ? next : prev;
+    });
+
+    setTeamB(prev => {
+      let changed = false;
+      const next = prev.map(tp => {
+        const fresh = allPlayers.find(p => p.id === tp.id);
+        if (fresh && (fresh.name !== tp.name || fresh.rating !== tp.rating || fresh.gender !== tp.gender || fresh.queueNumber !== tp.queueNumber)) {
+          changed = true;
+          return { ...tp, ...fresh };
+        }
+        return tp;
+      });
+      return changed ? next : prev;
+    });
+  }, [allPlayers]);
+
   // Push State to Firestore
   const syncStateToFirebase = useCallback(async (updates: any) => {
     if (!isAuthReady) return;
@@ -488,35 +519,84 @@ export default function App() {
     }
   };
 
-  const balanceTeams = useCallback((players: Player[]) => {
+  const balanceTeams = useCallback((players: Player[], useQueueOrder: boolean = false) => {
     if (players.length === 0) return { teamA: [], teamB: [] };
 
-    // Sort players by queue number ascending
-    const getQueueNum = (p: Player) => p.queueNumber !== undefined ? p.queueNumber : Infinity;
-    const sortedByQueue = [...players].sort((a, b) => getQueueNum(a) - getQueueNum(b));
+    if (useQueueOrder) {
+      // Sort players by queue number ascending
+      const getQueueNum = (p: Player) => p.queueNumber !== undefined ? p.queueNumber : Infinity;
+      const sortedByQueue = [...players].sort((a, b) => getQueueNum(a) - getQueueNum(b));
 
-    const tA: Player[] = [];
-    const tB: Player[] = [];
+      const tA: Player[] = [];
+      const tB: Player[] = [];
 
-    sortedByQueue.forEach((p, idx) => {
-      if (idx % 2 === 0) {
-        tA.push(p);
-      } else {
-        tB.push(p);
-      }
-    });
+      sortedByQueue.forEach((p, idx) => {
+        if (idx % 2 === 0) {
+          tA.push(p);
+        } else {
+          tB.push(p);
+        }
+      });
 
-    return { 
-      teamA: tA, 
-      teamB: tB 
-    };
+      return { 
+        teamA: tA, 
+        teamB: tB 
+      };
+    } else {
+      // Balanced distribution by gender and rating
+      // Shuffle first so consecutive clicks on "Mexer nas Equipes" yield different mixes
+      const shuffled = [...players].sort(() => Math.random() - 0.5);
+      
+      const women = shuffled.filter(p => p.gender === 'M').sort((a, b) => b.rating - a.rating);
+      const men = shuffled.filter(p => p.gender === 'H').sort((a, b) => b.rating - a.rating);
+
+      const tA: Player[] = [];
+      const tB: Player[] = [];
+      const half = Math.ceil(players.length / 2);
+
+      const distributeGroup = (group: Player[]) => {
+        group.forEach((p) => {
+          const sumA = tA.reduce((acc, curr) => acc + curr.rating, 0);
+          const sumB = tB.reduce((acc, curr) => acc + curr.rating, 0);
+
+          const canAddToA = tA.length < half;
+          const canAddToB = tB.length < half;
+
+          if (canAddToA && canAddToB) {
+            if (sumA < sumB) {
+              tA.push(p);
+            } else if (sumB < sumA) {
+              tB.push(p);
+            } else {
+              if (tA.length <= tB.length) {
+                tA.push(p);
+              } else {
+                tB.push(p);
+              }
+            }
+          } else if (canAddToA) {
+            tA.push(p);
+          } else if (canAddToB) {
+            tB.push(p);
+          }
+        });
+      };
+
+      distributeGroup(women);
+      distributeGroup(men);
+
+      return { 
+        teamA: tA, 
+        teamB: tB 
+      };
+    }
   }, []);
 
   const mixTeams = () => {
     const onCourt = [...teamA, ...teamB];
     if (onCourt.length === 0) return;
     saveHistory();
-    const { teamA: newA, teamB: newB } = balanceTeams(onCourt);
+    const { teamA: newA, teamB: newB } = balanceTeams(onCourt, false);
     setTeamA(newA);
     setTeamB(newB);
     setConsecutiveWinsA(0);
@@ -545,7 +625,7 @@ export default function App() {
     
     // Combine existing players with new players and run interleaved balancing
     const pool = [...teamA, ...teamB, ...toAdd];
-    const { teamA: newA, teamB: newB } = balanceTeams(pool);
+    const { teamA: newA, teamB: newB } = balanceTeams(pool, true);
     const newWaitlist = waitlist.slice(toAdd.length);
 
     setTeamA(newA);
@@ -781,12 +861,12 @@ export default function App() {
                 <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden">
                   <div className="bg-amber-500 p-4 text-slate-950 flex justify-between items-center">
                     <div>
-                      <h3 className="font-bold flex items-center gap-1.5 flex-wrap">
-                        <span>Time A</span>
-                        <span className="text-xs bg-slate-950/15 text-slate-900 px-2 py-0.5 rounded-full font-extrabold" title="Nota média do time">
-                          Média: {teamA.length > 0 ? (teamAScore / teamA.length).toFixed(1) : "0.0"}
+                      <h3 className="font-bold flex items-center gap-2 flex-wrap">
+                        <span className="text-lg">Time A</span>
+                        <span className="text-xs bg-slate-950 text-amber-400 border border-slate-800 px-2.5 py-1 rounded-lg font-black tracking-wider shadow-sm flex items-center gap-1" title="Nota média do time">
+                          MÉDIA: {teamA.length > 0 ? (teamAScore / teamA.length).toFixed(1) : "0.0"}
                         </span>
-                        <span className="text-[10px] bg-slate-950/10 text-slate-850 px-2 py-0.5 rounded-full font-semibold" title="Soma total das notas">
+                        <span className="text-[10px] bg-slate-950/10 text-slate-800 border border-slate-950/10 px-2 py-0.5 rounded-full font-bold" title="Soma total das notas">
                           Total: {teamAScore.toFixed(1)}
                         </span>
                       </h3>
@@ -897,12 +977,12 @@ export default function App() {
                 <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden">
                   <div className="bg-white p-4 text-slate-950 flex justify-between items-center">
                     <div>
-                      <h3 className="font-bold flex items-center gap-1.5 flex-wrap">
-                        <span>Time B</span>
-                        <span className="text-xs bg-slate-950/10 text-slate-800 px-2 py-0.5 rounded-full font-extrabold" title="Nota média do time">
-                          Média: {teamB.length > 0 ? (teamBScore / teamB.length).toFixed(1) : "0.0"}
+                      <h3 className="font-bold flex items-center gap-2 flex-wrap">
+                        <span className="text-lg">Time B</span>
+                        <span className="text-xs bg-slate-950 text-emerald-400 border border-slate-800 px-2.5 py-1 rounded-lg font-black tracking-wider shadow-sm flex items-center gap-1" title="Nota média do time">
+                          MÉDIA: {teamB.length > 0 ? (teamBScore / teamB.length).toFixed(1) : "0.0"}
                         </span>
-                        <span className="text-[10px] bg-slate-950/5 text-slate-600 px-2 py-0.5 rounded-full font-semibold" title="Soma total das notas">
+                        <span className="text-[10px] bg-slate-950/5 text-slate-600 border border-slate-950/5 px-2 py-0.5 rounded-full font-bold" title="Soma total das notas">
                           Total: {teamBScore.toFixed(1)}
                         </span>
                       </h3>
