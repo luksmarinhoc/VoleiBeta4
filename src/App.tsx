@@ -494,54 +494,24 @@ export default function App() {
   const balanceTeams = useCallback((players: Player[]) => {
     if (players.length === 0) return { teamA: [], teamB: [] };
 
-    // Shuffle players first to ensure different results on each mix for identical ratings
-    const shuffled = [...players].sort(() => Math.random() - 0.5);
-    
-    const women = shuffled.filter(p => p.gender === 'M').sort((a, b) => b.rating - a.rating);
-    const men = shuffled.filter(p => p.gender === 'H').sort((a, b) => b.rating - a.rating);
+    // Sort players by queue number ascending
+    const getQueueNum = (p: Player) => p.queueNumber !== undefined ? p.queueNumber : Infinity;
+    const sortedByQueue = [...players].sort((a, b) => getQueueNum(a) - getQueueNum(b));
 
     const tA: Player[] = [];
     const tB: Player[] = [];
 
-    const totalCount = players.length;
-    const half = Math.ceil(totalCount / 2);
-
-    const distributeGroup = (group: Player[]) => {
-      group.forEach((p) => {
-        const sumA = tA.reduce((acc, curr) => acc + curr.rating, 0);
-        const sumB = tB.reduce((acc, curr) => acc + curr.rating, 0);
-
-        const canAddToA = tA.length < half;
-        const canAddToB = tB.length < half;
-
-        if (canAddToA && canAddToB) {
-          if (sumA < sumB) {
-            tA.push(p);
-          } else if (sumB < sumA) {
-            tB.push(p);
-          } else {
-            // Equal sums, put in the team with fewer players
-            if (tA.length <= tB.length) {
-              tA.push(p);
-            } else {
-              tB.push(p);
-            }
-          }
-        } else if (canAddToA) {
-          tA.push(p);
-        } else if (canAddToB) {
-          tB.push(p);
-        }
-      });
-    };
-
-    // Interleave/distribute women first to ensure perfect gender balance, then men
-    distributeGroup(women);
-    distributeGroup(men);
+    sortedByQueue.forEach((p, idx) => {
+      if (idx % 2 === 0) {
+        tA.push(p);
+      } else {
+        tB.push(p);
+      }
+    });
 
     return { 
-      teamA: tA.sort((a, b) => (a.queueNumber || 0) - (b.queueNumber || 0)), 
-      teamB: tB.sort((a, b) => (a.queueNumber || 0) - (b.queueNumber || 0)) 
+      teamA: tA, 
+      teamB: tB 
     };
   }, []);
 
