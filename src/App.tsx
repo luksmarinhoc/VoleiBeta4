@@ -51,17 +51,10 @@ export default function App() {
   const [teamB, setTeamB] = useState<Player[]>([]);
   const [consecutiveWinsA, setConsecutiveWinsA] = useState(0);
   const [consecutiveWinsB, setConsecutiveWinsB] = useState(0);
+  const [showRatings, setShowRatings] = useState(true);
   const [lockedPlayers, setLockedPlayers] = useState<Set<string>>(new Set());
   const [nextQueueNumber, setNextQueueNumber] = useState(1);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [showRatings, setShowRatings] = useState(true);
-  const [divisionMethod, setDivisionMethod] = useState<'balanced' | 'alternating'>('balanced');
-
-  const womenCountA = useMemo(() => teamA.filter(p => p.gender === 'M').length, [teamA]);
-  const womenCountB = useMemo(() => teamB.filter(p => p.gender === 'M').length, [teamB]);
-  const hasGenderImbalance = useMemo(() => {
-    return (teamA.length > 0 && teamB.length > 0) && (womenCountA !== womenCountB);
-  }, [teamA, teamB, womenCountA, womenCountB]);
 
   // Firebase Auth Setup
   useEffect(() => {
@@ -135,12 +128,6 @@ export default function App() {
         setConsecutiveWinsB(data.consecutiveWinsB || 0);
         setNextQueueNumber(data.nextQueueNumber || 1);
         setLockedPlayers(new Set(data.lockedPlayers || []));
-        if (data.showRatings !== undefined) {
-          setShowRatings(data.showRatings);
-        }
-        if (data.divisionMethod !== undefined) {
-          setDivisionMethod(data.divisionMethod);
-        }
       }
     });
     return () => unsubscribe();
@@ -150,8 +137,7 @@ export default function App() {
   const syncStateToFirebase = useCallback(async (updates: any) => {
     if (!isAuthReady) return;
     try {
-      const cleanData = (obj: any) => JSON.parse(JSON.stringify(obj));
-      const stateData = cleanData({
+      await setDoc(doc(db, 'state', 'current'), {
         waitlist,
         teamA,
         teamB,
@@ -159,28 +145,23 @@ export default function App() {
         consecutiveWinsB,
         nextQueueNumber,
         lockedPlayers: Array.from(lockedPlayers),
-        showRatings,
-        divisionMethod,
         ...updates
-      });
-      await setDoc(doc(db, 'state', 'current'), stateData, { merge: true });
+      }, { merge: true });
     } catch (e) {
       console.error("Error syncing state:", e);
     }
-  }, [isAuthReady, waitlist, teamA, teamB, consecutiveWinsA, consecutiveWinsB, nextQueueNumber, lockedPlayers, showRatings, divisionMethod]);
+  }, [isAuthReady, waitlist, teamA, teamB, consecutiveWinsA, consecutiveWinsB, nextQueueNumber, lockedPlayers]);
 
   const syncPlayerToFirebase = async (player: Player) => {
     if (!isAuthReady) return;
-    const cleanPlayer = JSON.parse(JSON.stringify(player));
-    await setDoc(doc(db, 'players', player.id), cleanPlayer);
+    await setDoc(doc(db, 'players', player.id), player);
   };
 
   const syncAllPlayersToFirebase = async (players: Player[]) => {
     if (!isAuthReady) return;
     const batch = writeBatch(db);
     players.forEach(p => {
-      const cleanPlayer = JSON.parse(JSON.stringify(p));
-      batch.set(doc(db, 'players', p.id), cleanPlayer);
+      batch.set(doc(db, 'players', p.id), p);
     });
     await batch.commit();
   };
@@ -188,14 +169,15 @@ export default function App() {
   // UI State
   const [newPlayerName, setNewPlayerName] = useState('');
   const [newPlayerGender, setNewPlayerGender] = useState<Gender>('H');
-  const [newPlayerRating, setNewPlayerRating] = useState<number>(3.0);
+  const [newPlayerRating, setNewPlayerRating] = useState('3.0');
   const [activeTab, setActiveTab] = useState<'court' | 'waitlist' | 'inactive'>('court');
 
   // Editing State
   const [editingPlayerId, setEditingPlayerId] = useState<string | null>(null);
+  const [isBulkEditingRatings, setIsBulkEditingRatings] = useState(false);
   const [editName, setEditName] = useState('');
+  const [editRating, setEditRating] = useState('');
   const [editGender, setEditGender] = useState<Gender>('H');
-  const [editRating, setEditRating] = useState<number>(3.0);
 
   const saveHistory = useCallback(() => {
     setHistory(prev => [
@@ -213,7 +195,7 @@ export default function App() {
   }, [waitlist, teamA, teamB, consecutiveWinsA, consecutiveWinsB, nextQueueNumber, allPlayers]);
 
   const resetSession = () => {
-    if (window.confirm('Deseja resetar a partida? Isso removerá todos os jogadores da quadra e da espera, resetando a fila, mas MANTENDO os nomes.')) {
+    if (window.confirm('Deseja resetar a partida? Isso removerá todos os jogadores da quadra e da espera, resetando a fila, mas MANTENDO as notas e nomes.')) {
       saveHistory();
       const updates = {
         teamA: [],
@@ -266,13 +248,28 @@ export default function App() {
     if (waitlist.includes(id) || teamA.some(p => p.id === id) || teamB.some(p => p.id === id)) return;
     saveHistory();
     
+    // Assign queue number
+    const updatedPlayers = allPlayers.map(p => 
+      p.id === id ? { ...p, queueNumber: nextQueueNumber } : p
+    );
+    setAllPlayers(updatedPlayers);
+    const newNextQueue = nextQueueNumber + 1;
+    setNextQueueNumber(newNextQueue);
+    
     const newWaitlist = [...waitlist, id];
+    setWaitlist(newWaitlist);
+
+    // Automatically lock players when they enter the waitlist
     const newLocked = new Set(lockedPlayers);
     newLocked.add(id);
     setLockedPlayers(newLocked);
 
-    updateTeamsAndQueue(teamA, teamB, newWaitlist);
-    syncStateToFirebase({ lockedPlayers: Array.from(newLocked) });
+    syncAllPlayersToFirebase(updatedPlayers);
+    syncStateToFirebase({
+      waitlist: newWaitlist,
+      nextQueueNumber: newNextQueue,
+      lockedPlayers: Array.from(newLocked)
+    });
   };
 
   const removePlayerFromGame = (id: string) => {
@@ -282,6 +279,12 @@ export default function App() {
     if (teamA.some(p => p.id === id)) fromTeam = 'A';
     else if (teamB.some(p => p.id === id)) fromTeam = 'B';
 
+    // Clear queue number
+    const updatedPlayers = allPlayers.map(p => 
+      p.id === id ? { ...p, queueNumber: undefined } : p
+    );
+    setAllPlayers(updatedPlayers);
+    
     const newLocked = new Set(lockedPlayers);
     newLocked.delete(id);
     setLockedPlayers(newLocked);
@@ -292,7 +295,7 @@ export default function App() {
 
     if (fromTeam && newWaitlist.length > 0) {
       const nextId = newWaitlist[0];
-      const nextPlayer = allPlayers.find(p => p.id === nextId);
+      const nextPlayer = updatedPlayers.find(p => p.id === nextId);
       if (nextPlayer) {
         if (fromTeam === 'A') newTeamA = [...newTeamA.filter(p => p.id !== id), nextPlayer];
         else newTeamB = [...newTeamB.filter(p => p.id !== id), nextPlayer];
@@ -303,31 +306,40 @@ export default function App() {
       if (fromTeam === 'B') newTeamB = newTeamB.filter(p => p.id !== id);
     }
 
-    updateTeamsAndQueue(newTeamA, newTeamB, newWaitlist);
-    syncStateToFirebase({ lockedPlayers: Array.from(newLocked) });
+    setWaitlist(newWaitlist);
+    setTeamA(newTeamA);
+    setTeamB(newTeamB);
+
+    syncAllPlayersToFirebase(updatedPlayers);
+    syncStateToFirebase({
+      waitlist: newWaitlist,
+      teamA: newTeamA,
+      teamB: newTeamB,
+      lockedPlayers: Array.from(newLocked)
+    });
   };
 
   const registerPlayer = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPlayerName.trim()) return;
+    const ratingValue = parseFloat(newPlayerRating);
     const newPlayer: Player = {
       id: Math.random().toString(36).substr(2, 9),
       name: newPlayerName,
       gender: newPlayerGender,
-      rating: newPlayerRating,
+      rating: isNaN(ratingValue) ? 3.0 : Math.min(5, Math.max(0, ratingValue)),
       isGuest: true
     };
     setAllPlayers(prev => [...prev, newPlayer]);
     setNewPlayerName('');
-    setNewPlayerRating(3.0);
     syncPlayerToFirebase(newPlayer);
   };
 
   const startEditing = (p: Player) => {
     setEditingPlayerId(p.id);
     setEditName(p.name);
+    setEditRating(p.rating.toString());
     setEditGender(p.gender);
-    setEditRating(p.rating || 3.0);
   };
 
   const cancelEditing = () => {
@@ -335,8 +347,10 @@ export default function App() {
   };
 
   const savePlayerEdit = (id: string) => {
-    const existingPlayer = allPlayers.find(p => p.id === id)!;
-    const updatedPlayer = { ...existingPlayer, name: editName, gender: editGender, rating: editRating };
+    const ratingValue = parseFloat(editRating);
+    const validatedRating = isNaN(ratingValue) ? 3.0 : Math.min(5, Math.max(0, ratingValue));
+
+    const updatedPlayer = { ...allPlayers.find(p => p.id === id)!, name: editName, rating: validatedRating, gender: editGender };
     
     setAllPlayers(prev => prev.map(p => p.id === id ? updatedPlayer : p));
     setTeamA(prev => prev.map(p => p.id === id ? updatedPlayer : p));
@@ -345,6 +359,16 @@ export default function App() {
 
     syncPlayerToFirebase(updatedPlayer);
     syncStateToFirebase({}); // Trigger state sync to update teams in Firestore
+  };
+
+  const updatePlayerRating = (id: string, newRating: number) => {
+    const updatedPlayer = { ...allPlayers.find(p => p.id === id)!, rating: newRating };
+    setAllPlayers(prev => prev.map(p => p.id === id ? updatedPlayer : p));
+    setTeamA(prev => prev.map(p => p.id === id ? updatedPlayer : p));
+    setTeamB(prev => prev.map(p => p.id === id ? updatedPlayer : p));
+    
+    syncPlayerToFirebase(updatedPlayer);
+    syncStateToFirebase({});
   };
 
   const deletePlayer = async (id: string) => {
@@ -373,40 +397,6 @@ export default function App() {
     });
   };
 
-  const restoreOriginalRatings = async () => {
-    if (window.confirm('Deseja restaurar as notas (avaliações) originais de todos os jogadores padrão no banco de dados? Isso não removerá novos jogadores, apenas redefinirá as notas dos jogadores originais.')) {
-      saveHistory();
-      
-      const updatedPlayers = allPlayers.map(p => {
-        const original = INITIAL_PLAYERS.find(op => op.id === p.id);
-        if (original) {
-          return { ...p, rating: original.rating };
-        }
-        return p;
-      });
-      
-      setAllPlayers(updatedPlayers);
-      
-      const updatedTeamA = teamA.map(p => {
-        const original = INITIAL_PLAYERS.find(op => op.id === p.id);
-        return original ? { ...p, rating: original.rating } : p;
-      });
-      const updatedTeamB = teamB.map(p => {
-        const original = INITIAL_PLAYERS.find(op => op.id === p.id);
-        return original ? { ...p, rating: original.rating } : p;
-      });
-      setTeamA(updatedTeamA);
-      setTeamB(updatedTeamB);
-
-      await syncAllPlayersToFirebase(updatedPlayers);
-      await syncStateToFirebase({
-        teamA: updatedTeamA,
-        teamB: updatedTeamB
-      });
-      alert('Notas originais restauradas com sucesso!');
-    }
-  };
-
   const toggleLock = (id: string) => {
     const next = new Set(lockedPlayers);
     if (next.has(id)) next.delete(id);
@@ -415,92 +405,29 @@ export default function App() {
     syncStateToFirebase({ lockedPlayers: Array.from(next) });
   };
 
-  const reassignAllQueueNumbers = useCallback((
-    currentTeamA: Player[],
-    currentTeamB: Player[],
-    currentWaitlist: string[]
-  ) => {
-    // 1. Identify incoming players (those with queueNumber >= 13 or undefined, meaning they just came from waitlist)
-    // and staying players (those with queueNumber < 13)
-    const isIncoming = (p: Player) => p.queueNumber === undefined || p.queueNumber >= 13;
-
-    // 2. Sort Team A: incoming first (preserving prior order), then staying (preserving prior order)
-    const sortedA = [...currentTeamA].sort((a, b) => {
-      const aInc = isIncoming(a) ? 1 : 0;
-      const bInc = isIncoming(b) ? 1 : 0;
-      if (aInc !== bInc) return bInc - aInc; // Incoming first
-      return (a.queueNumber ?? 999999) - (b.queueNumber ?? 999999);
-    });
-
-    // 3. Sort Team B: incoming first, then staying
-    const sortedB = [...currentTeamB].sort((a, b) => {
-      const aInc = isIncoming(a) ? 1 : 0;
-      const bInc = isIncoming(b) ? 1 : 0;
-      if (aInc !== bInc) return bInc - aInc; // Incoming first
-      return (a.queueNumber ?? 999999) - (b.queueNumber ?? 999999);
-    });
-
-    // 4. Assign odd queue numbers to sortedA (Time A)
-    const finalA = sortedA.map((p, idx) => ({
-      ...p,
-      queueNumber: 1 + idx * 2 // 1, 3, 5, 7, 9, 11
-    }));
-
-    // 5. Assign even queue numbers to sortedB (Time B)
-    const finalB = sortedB.map((p, idx) => ({
-      ...p,
-      queueNumber: 2 + idx * 2 // 2, 4, 6, 8, 10, 12
-    }));
-
-    // 6. Update allPlayers with the newly assigned numbers
-    const updatedAllPlayers = allPlayers.map(p => {
-      const inA = finalA.find(x => x.id === p.id);
-      if (inA) return inA;
-
-      const inB = finalB.find(x => x.id === p.id);
-      if (inB) return inB;
-
-      const wlIdx = currentWaitlist.indexOf(p.id);
-      if (wlIdx !== -1) {
-        return {
-          ...p,
-          queueNumber: 13 + wlIdx // 13, 14, 15...
+  const updateWaitlistAndSyncNumbers = (newWaitlist: string[]) => {
+    // Get the pool of queue numbers currently in the waitlist
+    const playersInWaitlist = waitlist.map(id => allPlayers.find(p => p.id === id)).filter(Boolean) as Player[];
+    const currentNumbers = playersInWaitlist.map(p => p.queueNumber || 0).sort((a, b) => a - b);
+    
+    // Re-assign these numbers to the players in their new positions
+    const updatedAllPlayers = [...allPlayers];
+    newWaitlist.forEach((id, index) => {
+      const playerIndex = updatedAllPlayers.findIndex(p => p.id === id);
+      if (playerIndex !== -1 && index < currentNumbers.length) {
+        updatedAllPlayers[playerIndex] = {
+          ...updatedAllPlayers[playerIndex],
+          queueNumber: currentNumbers[index]
         };
       }
-
-      return { ...p, queueNumber: undefined };
     });
-
-    return {
-      teamA: finalA,
-      teamB: finalB,
-      allPlayers: updatedAllPlayers,
-      nextQueueNumber: 13 + currentWaitlist.length
-    };
-  }, [allPlayers]);
-
-  const updateTeamsAndQueue = useCallback((
-    newTeamA: Player[],
-    newTeamB: Player[],
-    newWaitlist: string[]
-  ) => {
-    const { teamA: finalA, teamB: finalB, allPlayers: finalAll, nextQueueNumber: finalNext } = 
-      reassignAllQueueNumbers(newTeamA, newTeamB, newWaitlist);
-
-    setTeamA(finalA);
-    setTeamB(finalB);
+    
+    setAllPlayers(updatedAllPlayers);
     setWaitlist(newWaitlist);
-    setAllPlayers(finalAll);
-    setNextQueueNumber(finalNext);
 
-    syncAllPlayersToFirebase(finalAll);
-    syncStateToFirebase({
-      teamA: finalA,
-      teamB: finalB,
-      waitlist: newWaitlist,
-      nextQueueNumber: finalNext
-    });
-  }, [reassignAllQueueNumbers, syncAllPlayersToFirebase, syncStateToFirebase]);
+    syncAllPlayersToFirebase(updatedAllPlayers);
+    syncStateToFirebase({ waitlist: newWaitlist });
+  };
 
   const moveInWaitlist = (index: number, direction: 'up' | 'down') => {
     saveHistory();
@@ -509,18 +436,8 @@ export default function App() {
     if (targetIndex < 0 || targetIndex >= newWaitlist.length) return;
     
     [newWaitlist[index], newWaitlist[targetIndex]] = [newWaitlist[targetIndex], newWaitlist[index]];
-    updateTeamsAndQueue(teamA, teamB, newWaitlist);
+    updateWaitlistAndSyncNumbers(newWaitlist);
   };
-
-  const sortTeamByPriority = useCallback((team: Player[]) => {
-    const isIncoming = (p: Player) => p.queueNumber === undefined || p.queueNumber >= 13;
-    return [...team].sort((a, b) => {
-      const aInc = isIncoming(a) ? 1 : 0;
-      const bInc = isIncoming(b) ? 1 : 0;
-      if (aInc !== bInc) return bInc - aInc; // Incoming/waitlist first
-      return (a.queueNumber ?? 999999) - (b.queueNumber ?? 999999);
-    });
-  }, []);
 
   const moveInTeam = (team: 'A' | 'B', index: number, direction: 'up' | 'down') => {
     saveHistory();
@@ -533,17 +450,24 @@ export default function App() {
 
     [currentTeam[index], currentTeam[targetIndex]] = [currentTeam[targetIndex], currentTeam[index]];
     if (team === 'A') {
-      updateTeamsAndQueue(currentTeam, teamB, waitlist);
+      setTeamA(currentTeam);
+      syncStateToFirebase({ teamA: currentTeam });
     } else {
-      updateTeamsAndQueue(teamA, currentTeam, waitlist);
+      setTeamB(currentTeam);
+      syncStateToFirebase({ teamB: currentTeam });
     }
   };
 
   const onReorderTeam = (team: 'A' | 'B', newOrder: Player[]) => {
+    // Check if any locked player changed their relative position
+    // This is complex with Reorder.Group, so we'll just allow it for now
+    // but prevent dragging locked players via dragListener
     if (team === 'A') {
-      updateTeamsAndQueue(newOrder, teamB, waitlist);
+      setTeamA(newOrder);
+      syncStateToFirebase({ teamA: newOrder });
     } else {
-      updateTeamsAndQueue(teamA, newOrder, waitlist);
+      setTeamB(newOrder);
+      syncStateToFirebase({ teamB: newOrder });
     }
   };
 
@@ -555,135 +479,73 @@ export default function App() {
     if (playerA) {
       const newA = teamA.filter(p => p.id !== id);
       const newB = [...teamB, playerA];
-      updateTeamsAndQueue(newA, newB, waitlist);
+      setTeamA(newA);
+      setTeamB(newB);
+      syncStateToFirebase({ teamA: newA, teamB: newB });
     } else if (playerB) {
       const newB = teamB.filter(p => p.id !== id);
       const newA = [...teamA, playerB];
-      updateTeamsAndQueue(newA, newB, waitlist);
+      setTeamB(newB);
+      setTeamA(newA);
+      syncStateToFirebase({ teamA: newA, teamB: newB });
     }
   };
 
   const balanceTeams = (players: Player[]) => {
     if (players.length === 0) return { teamA: [], teamB: [] };
 
-    if (divisionMethod === 'alternating') {
-      const tA: Player[] = [];
-      const tB: Player[] = [];
-
-      const winningPlayerIds = new Set(
-        consecutiveWinsA > 0 ? teamA.map(p => p.id) :
-        consecutiveWinsB > 0 ? teamB.map(p => p.id) : []
-      );
-
-      // Sort all players by priority (winners of previous match first, then incoming/challenger players)
-      // and within each group preserve their arrival/queueNumber order
-      const sortedPlayers = [...players].sort((a, b) => {
-        const isAWin = winningPlayerIds.has(a.id);
-        const isBWin = winningPlayerIds.has(b.id);
-
-        if (isAWin && !isBWin) return -1;
-        if (!isAWin && isBWin) return 1;
-
-        const qA = a.queueNumber ?? 999999;
-        const qB = b.queueNumber ?? 999999;
-        return qA - qB;
-      });
-
-      // Strict alternating division (1, 3, 5... to Team A, and 2, 4, 6... to Team B)
-      sortedPlayers.forEach((p, index) => {
-        if (index % 2 === 0) {
-          tA.push(p);
-        } else {
-          tB.push(p);
-        }
-      });
-
-      return {
-        teamA: sortTeamByPriority(tA),
-        teamB: sortTeamByPriority(tB)
-      };
-    }
-
-    // Balanced Mode: Balance by both rating AND gender!
-    // Sort players by rating descending
-    const sortedPlayers = [...players].sort((a, b) => b.rating - a.rating);
-
-    const women = sortedPlayers.filter(p => p.gender === 'M');
-    const men = sortedPlayers.filter(p => p.gender === 'H');
+    const half = Math.ceil(players.length / 2);
+    
+    // Shuffle players first to ensure different results on each mix
+    const shuffled = [...players].sort(() => Math.random() - 0.5);
+    
+    const women = shuffled.filter(p => p.gender === 'M');
+    const men = shuffled.filter(p => p.gender === 'H');
 
     const tA: Player[] = [];
     const tB: Player[] = [];
 
-    const getTeamRatingSum = (team: Player[]) => team.reduce((sum, p) => sum + p.rating, 0);
-
-    // Distribute women first (by rating descending) to ensure gender balance and level balance
-    women.forEach(p => {
-      if (tA.length < tB.length) {
+    // Distribute women first to ensure gender balance
+    women.forEach((p) => {
+      if (tA.length < half && (tB.length === half || tA.length <= tB.length)) {
         tA.push(p);
-      } else if (tB.length < tA.length) {
+      } else if (tB.length < half) {
         tB.push(p);
       } else {
-        // Equal sizes, put in the team with the lower rating sum
-        if (getTeamRatingSum(tA) <= getTeamRatingSum(tB)) {
-          tA.push(p);
-        } else {
-          tB.push(p);
-        }
+        tA.push(p);
       }
     });
 
-    // Distribute men next (by rating descending)
+    // Distribute men to balance ratings
     men.forEach(p => {
-      if (tA.length < tB.length) {
+      const sumA = tA.reduce((acc, curr) => acc + curr.rating, 0);
+      const sumB = tB.reduce((acc, curr) => acc + curr.rating, 0);
+
+      if (tA.length < half && (tB.length === half || sumA <= sumB)) {
         tA.push(p);
-      } else if (tB.length < tA.length) {
-        tB.push(p);
       } else {
-        // Equal sizes, put in the team with the lower rating sum
-        if (getTeamRatingSum(tA) <= getTeamRatingSum(tB)) {
-          tA.push(p);
-        } else {
-          tB.push(p);
-        }
+        tB.push(p);
       }
     });
 
     return { 
-      teamA: sortTeamByPriority(tA), 
-      teamB: sortTeamByPriority(tB) 
+      teamA: tA.sort((a, b) => (a.queueNumber || 0) - (b.queueNumber || 0)), 
+      teamB: tB.sort((a, b) => (a.queueNumber || 0) - (b.queueNumber || 0)) 
     };
   };
 
   const mixTeams = () => {
+    const onCourt = [...teamA, ...teamB];
+    if (onCourt.length === 0) return;
     saveHistory();
-    
-    // 1. Get current court players
-    const currentOnCourt = [...teamA, ...teamB];
-    
-    // 2. See how many players are needed to reach 12 on court
-    const needed = 12 - currentOnCourt.length;
-    
-    // 3. Take from waitlist if needed to complete the 12 players
-    const fromWaitlistCount = Math.min(waitlist.length, Math.max(0, needed));
-    const playersFromWaitlist = waitlist.slice(0, fromWaitlistCount).map(id => allPlayers.find(p => p.id === id)!).filter(Boolean);
-    const remainingWaitlistIds = waitlist.slice(fromWaitlistCount);
-    
-    // 4. Combine them to get the 12 players for the court
-    const allCourtPlayers = [...currentOnCourt, ...playersFromWaitlist];
-    
-    if (allCourtPlayers.length === 0) return;
-
-    // 5. Balance/mix them
-    const { teamA: mixedA, teamB: mixedB } = balanceTeams(allCourtPlayers);
-    
-    // Clear consecutive wins
+    const { teamA: newA, teamB: newB } = balanceTeams(onCourt);
+    setTeamA(newA);
+    setTeamB(newB);
     setConsecutiveWinsA(0);
     setConsecutiveWinsB(0);
-    
-    // 6. Update teams, reassign queue numbers, and sync
-    updateTeamsAndQueue(mixedA, mixedB, remainingWaitlistIds);
-    
     syncStateToFirebase({
+      teamA: newA,
+      teamB: newB,
       consecutiveWinsA: 0,
       consecutiveWinsB: 0
     });
@@ -703,74 +565,23 @@ export default function App() {
 
     saveHistory();
     
-    const newA = [...teamA];
-    const newB = [...teamB];
+    const playersForA = toAdd.slice(0, neededA);
+    const playersForB = toAdd.slice(neededA);
 
-    if (divisionMethod === 'alternating') {
-      let turnToA = newA.length <= newB.length;
-      toAdd.forEach(player => {
-        if (newA.length < 6 && (newB.length === 6 || turnToA)) {
-          newA.push(player);
-          turnToA = false;
-        } else if (newB.length < 6) {
-          newB.push(player);
-          turnToA = true;
-        } else {
-          newA.push(player);
-          turnToA = false;
-        }
-      });
-    } else {
-      const sortedToAdd = [...toAdd].sort((a, b) => b.rating - a.rating);
-      const getTeamRatingSum = (team: Player[]) => team.reduce((sum, p) => sum + p.rating, 0);
-      const getTeamGenderCount = (team: Player[], g: Gender) => team.filter(p => p.gender === g).length;
-
-      sortedToAdd.forEach(p => {
-        const canGoToA = newA.length < 6;
-        const canGoToB = newB.length < 6;
-
-        if (canGoToA && !canGoToB) {
-          newA.push(p);
-        } else if (!canGoToA && canGoToB) {
-          newB.push(p);
-        } else if (canGoToA && canGoToB) {
-          const femaleDiffA = getTeamGenderCount(newA, 'M');
-          const femaleDiffB = getTeamGenderCount(newB, 'M');
-          
-          if (p.gender === 'M') {
-            if (femaleDiffA < femaleDiffB) {
-              newA.push(p);
-            } else if (femaleDiffB < femaleDiffA) {
-              newB.push(p);
-            } else {
-              if (getTeamRatingSum(newA) <= getTeamRatingSum(newB)) {
-                newA.push(p);
-              } else {
-                newB.push(p);
-              }
-            }
-          } else {
-            const maleDiffA = getTeamGenderCount(newA, 'H');
-            const maleDiffB = getTeamGenderCount(newB, 'H');
-            if (maleDiffA < maleDiffB) {
-              newA.push(p);
-            } else if (maleDiffB < maleDiffA) {
-              newB.push(p);
-            } else {
-              if (getTeamRatingSum(newA) <= getTeamRatingSum(newB)) {
-                newA.push(p);
-              } else {
-                newB.push(p);
-              }
-            }
-          }
-        }
-      });
-    }
-
+    const newA = [...teamA, ...playersForA];
+    const newB = [...teamB, ...playersForB];
     const newWaitlist = waitlist.slice(toAdd.length);
-    updateTeamsAndQueue(newA, newB, newWaitlist);
-  }, [teamA, teamB, waitlist, allPlayers, saveHistory, divisionMethod, updateTeamsAndQueue]);
+
+    setTeamA(newA);
+    setTeamB(newB);
+    setWaitlist(newWaitlist);
+
+    syncStateToFirebase({
+      teamA: newA,
+      teamB: newB,
+      waitlist: newWaitlist
+    });
+  }, [teamA, teamB, waitlist, allPlayers, saveHistory, syncStateToFirebase]);
 
   const handleWin = (winner: 'A' | 'B') => {
     saveHistory();
@@ -779,93 +590,72 @@ export default function App() {
     
     // Update wins
     const newConsecutiveWins = (winner === 'A' ? consecutiveWinsA : consecutiveWinsB) + 1;
-    
-    if (newConsecutiveWins >= 3) {
-      // 3 wins rule: both teams leave the court and go to the waitlist!
-      // Losing team goes first, then winning team.
-      const newWaitlistAfterLeaving = [...waitlist, ...losingTeam.map(p => p.id), ...winningTeam.map(p => p.id)];
-      
-      // We need 12 players for the court
-      const courtPlayerIds = newWaitlistAfterLeaving.slice(0, 12);
-      const remainingWaitlistIds = newWaitlistAfterLeaving.slice(12);
-      
-      const courtPlayers = courtPlayerIds.map(id => allPlayers.find(p => p.id === id)!).filter(Boolean);
-      
-      // Balance/mix the teams on court
-      const { teamA: mixedA, teamB: mixedB } = balanceTeams(courtPlayers);
-      
-      setConsecutiveWinsA(0);
-      setConsecutiveWinsB(0);
-      
-      updateTeamsAndQueue(mixedA, mixedB, remainingWaitlistIds);
-      
-      syncStateToFirebase({
-        consecutiveWinsA: 0,
-        consecutiveWinsB: 0
-      });
-      return;
-    }
+    let finalWinsA = winner === 'A' ? newConsecutiveWins : 0;
+    let finalWinsB = winner === 'B' ? newConsecutiveWins : 0;
 
-    // Normal win logic (consecutive wins < 3):
-    // 1. Winning team stays.
-    // 2. Losing team goes to the waitlist.
-    const newWaitlistAfterLosing = [...waitlist, ...losingTeam.map(p => p.id)];
-    
-    // 3. Take as many as possible from waitlist to complete 12 players on court
+    // Logic for next team:
+    // 1. Take as many as possible from waitlist (up to 6)
+    // 2. If waitlist has < 6, take from the losing team to complete 6
     const numFromWaitlist = Math.min(waitlist.length, 6);
     const playersFromWaitlist = waitlist.slice(0, numFromWaitlist).map(id => allPlayers.find(p => p.id === id)!).filter(Boolean);
     
     const numNeededFromLosers = 6 - playersFromWaitlist.length;
     const playersFromLosers = losingTeam.slice(0, numNeededFromLosers);
-    const remainingLosers = losingTeam.slice(numNeededFromLosers);
-
-    const remainingWaitlistIds = waitlist.slice(numFromWaitlist);
-    const remainingWaitlist = remainingWaitlistIds.map(id => allPlayers.find(p => p.id === id)!).filter(Boolean);
-
+    
     const newChallengerTeam = [...playersFromWaitlist, ...playersFromLosers];
+    const remainingLosers = losingTeam.slice(numNeededFromLosers);
+    
+    // UPDATE QUEUE NUMBERS for players going to waitlist
+    let currentNext = nextQueueNumber;
+    const losersWithNewNumbers = remainingLosers.map(p => {
+      const updated = { ...p, queueNumber: currentNext };
+      currentNext++;
+      return updated;
+    });
+
+    // Update allPlayers with new queue numbers
+    const updatedAllPlayers = allPlayers.map(p => {
+      const updatedLoser = losersWithNewNumbers.find(l => l.id === p.id);
+      return updatedLoser || p;
+    });
 
     let newTeamA = winner === 'A' ? winningTeam : newChallengerTeam;
     let newTeamB = winner === 'B' ? winningTeam : newChallengerTeam;
     
-    const finalWaitlist = [...remainingWaitlist.map(p => p.id), ...remainingLosers.map(p => p.id)];
-
-    let finalWinsA = winner === 'A' ? newConsecutiveWins : 0;
-    let finalWinsB = winner === 'B' ? newConsecutiveWins : 0;
+    // New waitlist: remaining waitlist + remaining losers (with updated IDs)
+    const newWaitlist = [...waitlist.slice(numFromWaitlist), ...losersWithNewNumbers.map(p => p.id)];
 
     setConsecutiveWinsA(finalWinsA);
     setConsecutiveWinsB(finalWinsB);
+    setTeamA(newTeamA);
+    setTeamB(newTeamB);
+    setWaitlist(newWaitlist);
+    setAllPlayers(updatedAllPlayers);
+    setNextQueueNumber(currentNext);
 
-    updateTeamsAndQueue(newTeamA, newTeamB, finalWaitlist);
-    
+    syncAllPlayersToFirebase(updatedAllPlayers);
     syncStateToFirebase({
+      teamA: newTeamA,
+      teamB: newTeamB,
+      waitlist: newWaitlist,
       consecutiveWinsA: finalWinsA,
-      consecutiveWinsB: finalWinsB
+      consecutiveWinsB: finalWinsB,
+      nextQueueNumber: currentNext
     });
   };
+
+  const teamAScore = useMemo(() => teamA.reduce((acc, p) => acc + p.rating, 0), [teamA]);
+  const teamBScore = useMemo(() => teamB.reduce((acc, p) => acc + p.rating, 0), [teamB]);
+  const imbalance = useMemo(() => {
+    if (teamAScore === 0 || teamBScore === 0) return 0;
+    return Math.abs(teamAScore - teamBScore) / Math.max(teamAScore, teamBScore);
+  }, [teamAScore, teamBScore]);
 
   const inactivePlayers = allPlayers.filter(p => 
     !waitlist.includes(p.id) && 
     !teamA.some(tp => tp.id === p.id) && 
     !teamB.some(tp => tp.id === p.id)
   );
-
-  const getTeamAverage = (team: Player[]) => {
-    if (team.length === 0) return 0;
-    const ratedPlayers = team.filter(p => p.rating !== undefined);
-    if (ratedPlayers.length === 0) return 0;
-    const sum = ratedPlayers.reduce((acc, p) => acc + (p.rating ?? 0), 0);
-    return sum / ratedPlayers.length;
-  };
-
-  const getTeamSum = (team: Player[]) => {
-    const ratedPlayers = team.filter(p => p.rating !== undefined);
-    return ratedPlayers.reduce((acc, p) => acc + (p.rating ?? 0), 0);
-  };
-
-  const avgRatingA = getTeamAverage(teamA);
-  const avgRatingB = getTeamAverage(teamB);
-  const sumRatingA = getTeamSum(teamA);
-  const sumRatingB = getTeamSum(teamB);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-20">
@@ -901,16 +691,13 @@ export default function App() {
                 <LogIn className="w-4 h-4" /> ENTRAR
               </button>
             )}
+            <div className="w-px h-6 bg-slate-800 mx-1" />
             <button 
-              onClick={() => {
-                const next = !showRatings;
-                setShowRatings(next);
-                syncStateToFirebase({ showRatings: next });
-              }}
-              className={`p-2 rounded-full transition-colors ${showRatings ? 'text-amber-500 hover:bg-slate-800' : 'text-slate-500 hover:bg-slate-800'}`}
+              onClick={() => setShowRatings(!showRatings)}
+              className="p-2 hover:bg-slate-800 rounded-full transition-colors"
               title={showRatings ? "Ocultar Notas" : "Mostrar Notas"}
             >
-              {showRatings ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
+              {showRatings ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
             </button>
             <button 
               onClick={revertLastAction}
@@ -983,54 +770,8 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Division Method Selector */}
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div>
-                  <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                    <Users className="w-4 h-4 text-amber-500" />
-                    Método de Divisão de Equipes
-                  </h4>
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    {divisionMethod === 'balanced' 
-                      ? "Foca no equilíbrio geral balanceando por nível técnico e gênero através de sorteio." 
-                      : "Distribui os jogadores alternadamente pela ordem de chegada/espera (1,3,5... no Time A e 2,4,6... no Time B)."
-                    }
-                  </p>
-                </div>
-                <div className="flex gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 self-start md:self-auto">
-                  <button
-                    onClick={() => {
-                      setDivisionMethod('balanced');
-                      syncStateToFirebase({ divisionMethod: 'balanced' });
-                    }}
-                    className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-                      divisionMethod === 'balanced' 
-                        ? 'bg-amber-500 text-slate-950 shadow-md font-bold' 
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <Shuffle className="w-3.5 h-3.5" />
-                    Equilibrado (Nível)
-                  </button>
-                  <button
-                    onClick={() => {
-                      setDivisionMethod('alternating');
-                      syncStateToFirebase({ divisionMethod: 'alternating' });
-                    }}
-                    className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-                      divisionMethod === 'alternating' 
-                        ? 'bg-amber-500 text-slate-950 shadow-md font-bold' 
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <ArrowLeftRight className="w-3.5 h-3.5" />
-                    Alternado (Fila)
-                  </button>
-                </div>
-              </div>
-
               {/* Status Alerts */}
-              {(consecutiveWinsA >= 3 || consecutiveWinsB >= 3) && (
+              {(consecutiveWinsA >= 3 || consecutiveWinsB >= 3 || imbalance > 0.15) && (
                 <motion.div 
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -1043,7 +784,9 @@ export default function App() {
                     <div>
                       <p className="text-amber-200 font-bold text-sm">Sugestão de Reequilíbrio</p>
                       <p className="text-amber-400/70 text-xs">
-                        Sequência de vitórias: {Math.max(consecutiveWinsA, consecutiveWinsB)} partidas
+                        {consecutiveWinsA >= 3 || consecutiveWinsB >= 3 
+                          ? `Sequência de vitórias: ${Math.max(consecutiveWinsA, consecutiveWinsB)} partidas` 
+                          : `Desequilíbrio técnico: ${(imbalance * 100).toFixed(1)}%`}
                       </p>
                     </div>
                   </div>
@@ -1056,47 +799,22 @@ export default function App() {
                 </motion.div>
               )}
 
-              {hasGenderImbalance && (
-                <motion.div 
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-rose-500/10 border border-rose-500/30 p-4 rounded-xl flex items-center gap-3 shadow-lg shadow-rose-500/5 text-rose-200"
-                >
-                  <div className="w-10 h-10 rounded-full bg-rose-500/20 flex items-center justify-center shrink-0">
-                    <ArrowLeftRight className="w-5 h-5 text-rose-400" />
-                  </div>
-                  <div>
-                    <p className="text-rose-200 font-bold text-sm">Alerta: Desequilíbrio de Gênero</p>
-                    <p className="text-rose-400/80 text-xs">
-                      O Time A tem <span className="font-bold text-rose-300">{womenCountA}</span> {womenCountA === 1 ? 'mulher' : 'mulheres'} e o Time B tem <span className="font-bold text-rose-300">{womenCountB}</span> {womenCountB === 1 ? 'mulher' : 'mulheres'}. Considere trocar jogadores para balancear as equipes.
-                    </p>
-                  </div>
-                </motion.div>
-              )}
-
               {/* Teams Grid */}
               <div className="grid md:grid-cols-2 gap-6">
                 {/* Team A */}
                 <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden">
                   <div className="bg-amber-500 p-4 text-slate-950 flex justify-between items-center">
                     <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-bold">Time A</h3>
-                        {showRatings && teamA.length > 0 && (
-                          <div className="flex gap-1 flex-wrap">
-                            <span className="text-xs bg-amber-600/30 px-2 py-0.5 rounded-full font-bold">
-                              Média: {avgRatingA.toFixed(1)}
+                      <h3 className="font-bold">Time A</h3>
+                      {showRatings && (
+                        <div className="flex items-center gap-2">
+                          <p className="text-amber-900 text-xs font-medium">Soma: {teamAScore.toFixed(2)}</p>
+                          {imbalance > 0 && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${imbalance > 0.15 ? 'bg-rose-500/20 text-rose-900' : 'bg-amber-600/20 text-amber-900'}`}>
+                              Δ {(imbalance * 100).toFixed(0)}%
                             </span>
-                            <span className="text-xs bg-amber-600/30 px-2 py-0.5 rounded-full font-bold">
-                              Soma: {sumRatingA.toFixed(1)}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                      {teamA.length > 0 && (
-                        <p className="text-[10px] text-slate-900 font-bold opacity-80 mt-0.5">
-                          {teamA.filter(p => p.gender === 'M').length} ♀ • {teamA.filter(p => p.gender === 'H').length} ♂
-                        </p>
+                          )}
+                        </div>
                       )}
                     </div>
                     <div className="flex items-center gap-2">
@@ -1128,12 +846,21 @@ export default function App() {
                                 <p className="text-sm font-semibold text-slate-200">
                                   {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
                                   {p.name}
-                                  {showRatings && p.rating !== undefined && (
-                                    <span className="ml-1.5 text-xs text-amber-500 bg-amber-500/10 px-1 rounded font-medium">
-                                      ★ {p.rating.toFixed(2)}
-                                    </span>
-                                  )}
                                 </p>
+                                {showRatings && (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[10px] text-slate-500">Nota:</span>
+                                    <input 
+                                      type="number" 
+                                      step="0.1"
+                                      min="0"
+                                      max="5"
+                                      value={p.rating}
+                                      onChange={(e) => updatePlayerRating(p.id, Math.min(5, Math.max(0, parseFloat(e.target.value) || 0)))}
+                                      className="w-10 bg-transparent border-none text-[10px] text-amber-500 font-bold focus:ring-0 p-0"
+                                    />
+                                  </div>
+                                )}
                               </div>
                             </div>
                             <div className="flex items-center gap-1">
@@ -1189,23 +916,16 @@ export default function App() {
                 <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden">
                   <div className="bg-white p-4 text-slate-950 flex justify-between items-center">
                     <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-bold">Time B</h3>
-                        {showRatings && teamB.length > 0 && (
-                          <div className="flex gap-1 flex-wrap">
-                            <span className="text-xs bg-slate-200 px-2 py-0.5 rounded-full font-bold">
-                              Média: {avgRatingB.toFixed(1)}
+                      <h3 className="font-bold">Time B</h3>
+                      {showRatings && (
+                        <div className="flex items-center gap-2">
+                          <p className="text-slate-500 text-xs font-medium">Soma: {teamBScore.toFixed(2)}</p>
+                          {imbalance > 0 && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${imbalance > 0.15 ? 'bg-rose-500/20 text-rose-600' : 'bg-slate-200 text-slate-500'}`}>
+                              Δ {(imbalance * 100).toFixed(0)}%
                             </span>
-                            <span className="text-xs bg-slate-200 px-2 py-0.5 rounded-full font-bold">
-                              Soma: {sumRatingB.toFixed(1)}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                      {teamB.length > 0 && (
-                        <p className="text-[10px] text-slate-500 font-bold opacity-80 mt-0.5">
-                          {teamB.filter(p => p.gender === 'M').length} ♀ • {teamB.filter(p => p.gender === 'H').length} ♂
-                        </p>
+                          )}
+                        </div>
                       )}
                     </div>
                     <div className="flex items-center gap-2">
@@ -1237,12 +957,21 @@ export default function App() {
                                 <p className="text-sm font-semibold text-slate-200">
                                   {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
                                   {p.name}
-                                  {showRatings && p.rating !== undefined && (
-                                    <span className="ml-1.5 text-xs text-amber-500 bg-amber-500/10 px-1 rounded font-medium">
-                                      ★ {p.rating.toFixed(2)}
-                                    </span>
-                                  )}
                                 </p>
+                                {showRatings && (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[10px] text-slate-500">Nota:</span>
+                                    <input 
+                                      type="number" 
+                                      step="0.1"
+                                      min="0"
+                                      max="5"
+                                      value={p.rating}
+                                      onChange={(e) => updatePlayerRating(p.id, Math.min(5, Math.max(0, parseFloat(e.target.value) || 0)))}
+                                      className="w-10 bg-transparent border-none text-[10px] text-amber-500 font-bold focus:ring-0 p-0"
+                                    />
+                                  </div>
+                                )}
                               </div>
                             </div>
                             <div className="flex items-center gap-1">
@@ -1346,7 +1075,7 @@ export default function App() {
                     </button>
                   </div>
                 </div>
-                <Reorder.Group axis="y" values={waitlist} onReorder={(newOrder) => updateTeamsAndQueue(teamA, teamB, newOrder)} className="space-y-2">
+                <Reorder.Group axis="y" values={waitlist} onReorder={updateWaitlistAndSyncNumbers} className="space-y-2">
                   {waitlist.length === 0 ? (
                     <p className="text-slate-600 text-center py-12 text-sm italic">Ninguém na espera</p>
                   ) : (
@@ -1370,12 +1099,21 @@ export default function App() {
                               <p className="text-sm font-bold text-slate-200">
                                 {index + 1}. {p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
                                 {p.name}
-                                {showRatings && p.rating !== undefined && (
-                                  <span className="ml-1.5 text-xs text-amber-500 bg-amber-500/10 px-1 rounded font-medium">
-                                    ★ {p.rating.toFixed(2)}
-                                  </span>
-                                )}
                               </p>
+                              {showRatings && (
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[10px] text-slate-500">Nota:</span>
+                                  <input 
+                                    type="number" 
+                                    step="0.1"
+                                    min="0"
+                                    max="5"
+                                    value={p.rating}
+                                    onChange={(e) => updatePlayerRating(p.id, Math.min(5, Math.max(0, parseFloat(e.target.value) || 0)))}
+                                    className="w-10 bg-transparent border-none text-[10px] text-amber-500 font-bold focus:ring-0 p-0"
+                                  />
+                                </div>
+                              )}
                             </div>
                           </div>
                           <div className="flex items-center gap-1">
@@ -1436,18 +1174,18 @@ export default function App() {
                   <UserPlus className="w-5 h-5 text-amber-500" />
                   Novo Jogador / Convidado
                 </h3>
-                <div className="flex flex-col md:flex-row gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   <input 
                     type="text" 
                     placeholder="Nome" 
                     value={newPlayerName}
                     onChange={e => setNewPlayerName(e.target.value)}
-                    className="flex-1 p-3 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-200 focus:ring-2 focus:ring-amber-500 outline-none placeholder:text-slate-600"
+                    className="col-span-2 p-3 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-200 focus:ring-2 focus:ring-amber-500 outline-none placeholder:text-slate-600"
                   />
                   <select 
                     value={newPlayerGender}
                     onChange={e => setNewPlayerGender(e.target.value as Gender)}
-                    className="md:w-48 p-3 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-200 focus:ring-2 focus:ring-amber-500 outline-none"
+                    className="p-3 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-200 focus:ring-2 focus:ring-amber-500 outline-none"
                   >
                     <option value="H">Homem (H)</option>
                     <option value="M">Mulher (M)</option>
@@ -1457,10 +1195,10 @@ export default function App() {
                     step="0.01"
                     min="0"
                     max="5"
-                    placeholder="Nota (0-5)" 
+                    placeholder="Nota (0 a 5)" 
                     value={newPlayerRating}
-                    onChange={e => setNewPlayerRating(parseFloat(e.target.value) || 0)}
-                    className="md:w-32 p-3 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-200 focus:ring-2 focus:ring-amber-500 outline-none placeholder:text-slate-600"
+                    onChange={e => setNewPlayerRating(e.target.value)}
+                    className="p-3 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-200 focus:ring-2 focus:ring-amber-500 outline-none placeholder:text-slate-600"
                   />
                 </div>
                 <button type="submit" className="w-full py-3 bg-amber-500 text-slate-950 rounded-xl font-bold hover:bg-amber-400 transition-all">
@@ -1473,43 +1211,29 @@ export default function App() {
                 <div className="flex justify-between items-center mb-4">
                   <div>
                     <h3 className="font-bold text-slate-200">Jogadores FORA DE JOGO</h3>
-                  </div>
-                  <div className="flex gap-3">
                     <button 
-                      onClick={restoreOriginalRatings}
-                      className="text-[10px] font-bold text-amber-500 hover:text-amber-400 transition-colors uppercase"
+                      onClick={() => setIsBulkEditingRatings(!isBulkEditingRatings)}
+                      className={`text-[10px] font-bold px-2 py-1 rounded mt-1 transition-colors ${isBulkEditingRatings ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
                     >
-                      Restaurar Notas Originais
-                    </button>
-                    <button 
-                      onClick={() => {
-                        if (window.confirm('Deseja resetar todos os jogadores para a lista inicial? Isso apagará jogadores novos e resetará a contagem da fila.')) {
-                          saveHistory();
-                          setAllPlayers(INITIAL_PLAYERS);
-                          setWaitlist([]);
-                          setTeamA([]);
-                          setTeamB([]);
-                          setLockedPlayers(new Set());
-                          setNextQueueNumber(1);
-
-                          // Sync immediately to Firebase
-                          syncAllPlayersToFirebase(INITIAL_PLAYERS);
-                          syncStateToFirebase({
-                            teamA: [],
-                            teamB: [],
-                            waitlist: [],
-                            consecutiveWinsA: 0,
-                            consecutiveWinsB: 0,
-                            nextQueueNumber: 1,
-                            lockedPlayers: []
-                          });
-                        }
-                      }}
-                      className="text-[10px] font-bold text-slate-500 hover:text-rose-500 transition-colors uppercase"
-                    >
-                      RESETAR LISTA
+                      {isBulkEditingRatings ? 'CONCLUIR EDIÇÃO' : 'EDITAR TODAS AS NOTAS'}
                     </button>
                   </div>
+                  <button 
+                    onClick={() => {
+                      if (window.confirm('Deseja resetar todos os jogadores para a lista inicial? Isso apagará jogadores novos e resetará a contagem da fila.')) {
+                        saveHistory();
+                        setAllPlayers(INITIAL_PLAYERS);
+                        setWaitlist([]);
+                        setTeamA([]);
+                        setTeamB([]);
+                        setLockedPlayers(new Set());
+                        setNextQueueNumber(1);
+                      }
+                    }}
+                    className="text-[10px] text-slate-500 hover:text-rose-500 transition-colors"
+                  >
+                    RESETAR LISTA
+                  </button>
                 </div>
                 <div className="grid grid-cols-1 gap-2">
                   {[...allPlayers].sort((a, b) => {
@@ -1527,33 +1251,30 @@ export default function App() {
                       <div key={p.id} className="p-3 rounded-xl bg-slate-800/50 border border-slate-800 hover:border-amber-500/30 transition-colors">
                         {editingPlayerId === p.id ? (
                           <div className="space-y-3">
-                            <div className="flex flex-col md:flex-row gap-2">
+                            <div className="grid grid-cols-2 gap-2">
                               <input 
                                 type="text" 
                                 value={editName}
                                 onChange={e => setEditName(e.target.value)}
-                                className="flex-1 p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
+                                className="col-span-2 p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
                               />
-                              <div className="flex gap-2">
-                                <select 
-                                  value={editGender}
-                                  onChange={e => setEditGender(e.target.value as Gender)}
-                                  className="w-16 p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
-                                >
-                                  <option value="H">H</option>
-                                  <option value="M">M</option>
-                                </select>
-                                <input 
-                                  type="number" 
-                                  step="0.01"
-                                  min="0"
-                                  max="5"
-                                  placeholder="Nota"
-                                  value={editRating}
-                                  onChange={e => setEditRating(parseFloat(e.target.value) || 0)}
-                                  className="w-20 p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
-                                />
-                              </div>
+                              <select 
+                                value={editGender}
+                                onChange={e => setEditGender(e.target.value as Gender)}
+                                className="p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
+                              >
+                                <option value="H">H</option>
+                                <option value="M">M</option>
+                              </select>
+                              <input 
+                                type="number" 
+                                step="0.01"
+                                min="0"
+                                max="5"
+                                value={editRating}
+                                onChange={e => setEditRating(e.target.value)}
+                                className="p-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 outline-none focus:ring-2 focus:ring-amber-500"
+                              />
                             </div>
                             <div className="flex gap-2">
                               <button 
@@ -1581,14 +1302,27 @@ export default function App() {
                                   <p className="text-sm font-semibold text-slate-200">
                                     {isInGame && p.queueNumber && <span className="text-amber-500 mr-1">#{p.queueNumber}</span>}
                                     {p.name}
-                                    {showRatings && p.rating !== undefined && (
-                                      <span className="ml-1.5 text-xs text-amber-500 bg-amber-500/10 px-1 rounded font-medium">
-                                        ★ {p.rating.toFixed(2)}
-                                      </span>
-                                    )}
                                   </p>
                                   {isInGame && <span className="text-[8px] bg-amber-500/20 text-amber-500 px-1 rounded">EM JOGO</span>}
                                 </div>
+                                {showRatings && (
+                                  isBulkEditingRatings ? (
+                                    <div className="flex items-center gap-1 mt-1">
+                                      <span className="text-[10px] text-slate-500">Nota:</span>
+                                      <input 
+                                        type="number" 
+                                        step="0.1"
+                                        min="0"
+                                        max="5"
+                                        value={p.rating}
+                                        onChange={(e) => updatePlayerRating(p.id, Math.min(5, Math.max(0, parseFloat(e.target.value) || 0)))}
+                                        className="w-12 bg-slate-800 border border-slate-700 rounded px-1 text-[10px] text-amber-500 font-bold focus:ring-1 focus:ring-amber-500 outline-none"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <p className="text-[10px] text-slate-500">Nota: {p.rating}</p>
+                                  )
+                                )}
                               </div>
                             </div>
                             <div className="flex items-center gap-1">

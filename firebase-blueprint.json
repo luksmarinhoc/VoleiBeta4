@@ -25,8 +25,7 @@
         "consecutiveWinsA": { "type": "number" },
         "consecutiveWinsB": { "type": "number" },
         "nextQueueNumber": { "type": "number" },
-        "lockedPlayers": { "type": "array", "items": { "type": "string" } },
-        "divisionMethod": { "type": "string" }
+        "lockedPlayers": { "type": "array", "items": { "type": "string" } }
       }
     }
   },
